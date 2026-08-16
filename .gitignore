@@ -1,0 +1,27 @@
+target/
+allure-results/
+allure-report/
+.idea/
+*.iml
+.classpath
+.project
+.settings/
+.DS_Store
+*.log
+.env
+.env.*
+!.env.example
+
+# Secrets and local credentials
+*.pfx
+*.p12
+*.jks
+*.keystore
+*.pem
+*.key
+*.crt
+*.cer
+*.vault
+*credentials*.properties
+*secrets*.properties
+
