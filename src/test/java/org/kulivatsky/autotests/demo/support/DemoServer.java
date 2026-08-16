@@ -14,12 +14,31 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
+/**
+ * Self-contained local HTTP server used only by showcase tests.
+ *
+ * <p>The server binds to loopback on an ephemeral port, so it neither depends on external test
+ * infrastructure nor reserves a fixed port. It exposes a tiny order API, multipart-upload endpoint,
+ * and catalog HTML page. A scheduled executor simulates asynchronous order completion.</p>
+ *
+ * <p>The class owns its HTTP server and both executors. Tests must close it; the demo test fixtures
+ * do so from {@code @AfterMethod(alwaysRun = true)}.</p>
+ */
 public final class DemoServer implements AutoCloseable {
+  /** JDK HTTP server bound to loopback. */
   private final HttpServer server;
+  /** Executor used by incoming HTTP exchanges. */
   private final ExecutorService requestExecutor;
+  /** Executor used to simulate delayed state transitions. */
   private final ScheduledExecutorService scheduler;
+  /** In-memory order id to status state shared safely across request/scheduler threads. */
   private final Map<Long, String> orderStatuses = new ConcurrentHashMap<>();
 
+  /**
+   * Creates, configures, and immediately starts a local server on a free port.
+   *
+   * @throws IllegalStateException when the JDK HTTP server cannot bind/create
+   */
   public DemoServer() {
     try {
       this.server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -36,14 +55,31 @@ public final class DemoServer implements AutoCloseable {
     this.server.start();
   }
 
+  /**
+   * Returns the loopback origin of the running server.
+   *
+   * @return URL in {@code http://127.0.0.1:<ephemeralPort>} form
+   */
   public String baseUrl() {
     return "http://127.0.0.1:" + this.server.getAddress().getPort();
   }
 
+  /**
+   * Appends a path to {@link #baseUrl()} without additional slash normalization.
+   *
+   * @param path path expected to begin with {@code /}
+   * @return absolute local URL
+   */
   public String url(final String path) {
     return baseUrl() + path;
   }
 
+  /**
+   * Stops accepting requests and interrupts both owned executors.
+   *
+   * <p>{@code stop(0)} requests immediate HTTP-server shutdown; this demo fixture does not wait for
+   * graceful draining because no shared external work is performed.</p>
+   */
   @Override
   public void close() {
     this.server.stop(0);
@@ -51,6 +87,16 @@ public final class DemoServer implements AutoCloseable {
     this.requestExecutor.shutdownNow();
   }
 
+  /**
+   * Handles creation and lookup for the synthetic order resource.
+   *
+   * <p>Order 42 is a fixed READY fixture. POST creates order 1001 in PENDING state and schedules a
+   * transition to COMPLETED after 250 ms. Other numeric ids are looked up from the in-memory status
+   * map.</p>
+   *
+   * @param exchange incoming HTTP exchange
+   * @throws IOException when request/response stream I/O fails
+   */
   private void handleOrders(final HttpExchange exchange) throws IOException {
     final String method = exchange.getRequestMethod();
     final String path = exchange.getRequestURI().getPath();
@@ -80,6 +126,15 @@ public final class DemoServer implements AutoCloseable {
     json(exchange, 405, "{\"message\":\"Method not allowed\"}");
   }
 
+  /**
+   * Handles the synthetic multipart upload endpoint.
+   *
+   * <p>The demo does not implement a multipart parser. It reads the raw request body and checks for
+   * the known fixture text, which is sufficient to prove that the file content reached the server.</p>
+   *
+   * @param exchange incoming HTTP exchange
+   * @throws IOException when request/response stream I/O fails
+   */
   private void handleUpload(final HttpExchange exchange) throws IOException {
     if (!"POST".equals(exchange.getRequestMethod())) {
       json(exchange, 405, "{\"message\":\"Method not allowed\"}");
@@ -93,6 +148,12 @@ public final class DemoServer implements AutoCloseable {
     json(exchange, 201, "{\"fileName\":\"sample-upload.txt\",\"status\":\"STORED\"}");
   }
 
+  /**
+   * Serves a minimal interactive HTML page used by the Selenide example.
+   *
+   * @param exchange incoming HTTP exchange
+   * @throws IOException when response stream I/O fails
+   */
   private void handleCatalog(final HttpExchange exchange) throws IOException {
     final String html = """
       <!doctype html>
@@ -114,6 +175,18 @@ public final class DemoServer implements AutoCloseable {
     }
   }
 
+  /**
+   * Serializes the fixed demo order shape.
+   *
+   * <p>Inputs are controlled test fixtures; this helper is not a general JSON encoder and performs
+   * no escaping.</p>
+   *
+   * @param id order id
+   * @param product product name
+   * @param quantity quantity
+   * @param status order status
+   * @return compact JSON document
+   */
   private static String orderJson(final long id,
                                   final String product,
                                   final int quantity,
@@ -122,6 +195,14 @@ public final class DemoServer implements AutoCloseable {
       .formatted(id, product, quantity, status);
   }
 
+  /**
+   * Writes a UTF-8 JSON response and closes the response stream.
+   *
+   * @param exchange exchange receiving the response
+   * @param status HTTP status code
+   * @param body serialized JSON body
+   * @throws IOException when headers or body cannot be written
+   */
   private static void json(final HttpExchange exchange, final int status, final String body) throws IOException {
     final byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
     exchange.getResponseHeaders().set("Content-Type", "application/json; charset=utf-8");

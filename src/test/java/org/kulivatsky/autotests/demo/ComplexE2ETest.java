@@ -27,19 +27,30 @@ import static org.kulivatsky.autotests.demo.api.DemoApiSteps.createOrder;
 import static org.kulivatsky.autotests.demo.api.DemoApiSteps.getOrder;
 import static org.kulivatsky.autotests.demo.api.DemoApiSteps.upload;
 
+/**
+ * End-to-end API example covering command creation, asynchronous state change, subsequent query,
+ * classpath-file materialization, and multipart upload.
+ */
 public final class ComplexE2ETest {
+  /** Local system-under-test stub owned by the current test method. */
   private DemoServer server;
 
+  /** Starts a fresh local demo system before each test method. */
   @BeforeMethod
   public void setUp() {
     this.server = new DemoServer();
   }
 
+  /** Stops all server executors and sockets after each test method. */
   @AfterMethod(alwaysRun = true)
   public void tearDown() {
     this.server.close();
   }
 
+  /**
+   * Demonstrates a multi-stage flow where the created order becomes complete asynchronously before
+   * the test fetches it again and uploads an attachment.
+   */
   @Test
   @TestInfo(
     name = "Create an order, await completion and upload an attachment",

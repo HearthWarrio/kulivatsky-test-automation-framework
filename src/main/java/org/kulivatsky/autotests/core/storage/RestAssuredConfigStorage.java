@@ -7,10 +7,21 @@ import org.kulivatsky.autotests.core.config.APIService;
 import org.kulivatsky.autotests.core.config.Config;
 import org.kulivatsky.autotests.core.config.Env;
 
+/** Builds REST Assured configuration from framework properties. */
 public final class RestAssuredConfigStorage {
+  /** No instances. */
   private RestAssuredConfigStorage() {
   }
 
+  /**
+   * Builds a fresh REST Assured configuration for the current launch.
+   *
+   * <p>{@code rest.timeoutMs} is applied to both socket and connection timeouts. Relaxed HTTPS
+   * validation is disabled by default and is enabled only when
+   * {@code rest.relaxedHttpsValidation=true} is explicitly configured.</p>
+   *
+   * @return newly built REST Assured configuration
+   */
   public static RestAssuredConfig config() {
     final Config config = Config.current();
     final int timeout = config.intProperty("rest.timeoutMs", 30_000);
@@ -25,6 +36,16 @@ public final class RestAssuredConfigStorage {
     return result;
   }
 
+  /**
+   * Returns REST Assured configuration for a service/environment pair.
+   *
+   * <p>The current implementation uses global REST settings and ignores both selectors. It is
+   * therefore equivalent to calling {@link #config()} directly.</p>
+   *
+   * @param apiService service selector; currently not used
+   * @param env environment selector; currently not used
+   * @return newly built REST Assured configuration
+   */
   public static RestAssuredConfig configFor(final APIService apiService, final Env env) {
     return config();
   }

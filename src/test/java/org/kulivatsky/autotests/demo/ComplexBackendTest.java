@@ -25,10 +25,17 @@ import static org.kulivatsky.autotests.core.step.CommonSteps.executeUpdate;
 import static org.kulivatsky.autotests.core.step.KafkaSteps.send;
 import static org.kulivatsky.autotests.core.step.Steps.step;
 
+/**
+ * Backend integration example combining JDBC persistence, a Kafka producer, polling, and explicit
+ * report steps without requiring external infrastructure.
+ */
 public final class ComplexBackendTest {
+  /** Owning facade for the per-test in-memory H2 connection pool. */
   private Database database;
+  /** In-memory Kafka producer used to demonstrate the producer step contract. */
   private MockProducer<String, String> producer;
 
+  /** Creates isolated H2 state and a Kafka mock producer before each test method. */
   @BeforeMethod
   public void setUp() {
     final BasicDataSource dataSource = new BasicDataSource();
@@ -42,6 +49,7 @@ public final class ComplexBackendTest {
     this.producer = new MockProducer<>(true, new StringSerializer(), new StringSerializer());
   }
 
+  /** Closes both test-owned resources even after a failed test body. */
   @AfterMethod(alwaysRun = true)
   public void tearDown() {
     if (this.producer != null) {
@@ -52,6 +60,10 @@ public final class ComplexBackendTest {
     }
   }
 
+  /**
+   * Demonstrates a backend flow that persists an entity, checks stored state, publishes an event,
+   * and verifies the observable producer history.
+   */
   @Test
   @TestInfo(
     name = "Persist an order and publish its event",

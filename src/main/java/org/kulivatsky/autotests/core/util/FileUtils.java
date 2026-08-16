@@ -10,10 +10,19 @@ import java.nio.file.Path;
 import java.util.Objects;
 import java.util.stream.Stream;
 
+/** Reads, compares, and locates files used by download and fixture assertions. */
 public final class FileUtils {
+  /** No instances. */
   private FileUtils() {
   }
 
+  /**
+   * Reads a file with the JDK's default UTF-8 behavior of {@link Files#readString(Path)}.
+   *
+   * @param path filesystem path
+   * @return complete file contents
+   * @throws IllegalStateException when the file cannot be read
+   */
   public static String readFile(final String path) {
     try {
       return Files.readString(Path.of(path));
@@ -22,6 +31,15 @@ public final class FileUtils {
     }
   }
 
+  /**
+   * Compares two files byte-for-byte.
+   *
+   * @param actual actual file
+   * @param expected expected file
+   * @return {@code true} only when both files have identical bytes and length
+   * @throws NullPointerException when either file argument is null
+   * @throws IllegalStateException when either file cannot be read
+   */
   public static boolean compareFiles(final File actual, final File expected) {
     Objects.requireNonNull(actual, "actual");
     Objects.requireNonNull(expected, "expected");
@@ -32,6 +50,17 @@ public final class FileUtils {
     }
   }
 
+  /**
+   * Recursively searches a directory tree for the first regular file with an exact filename.
+   *
+   * <p>No ordering guarantee is imposed beyond the order produced by {@link Files#find}; if more
+   * than one matching file exists, callers must not assume which one is returned.</p>
+   *
+   * @param rootFolder directory from which recursive search starts
+   * @param fileName exact final path component to match
+   * @return first matching file
+   * @throws IllegalStateException when traversal fails or no file is found
+   */
   public static File searchFile(final String rootFolder, final String fileName) {
     final Path root = Path.of(rootFolder);
     try (Stream<Path> files = Files.find(root, Integer.MAX_VALUE,
@@ -44,6 +73,12 @@ public final class FileUtils {
     }
   }
 
+  /**
+   * Searches Selenide's configured downloads directory for an exact filename.
+   *
+   * @param fileName filename to find
+   * @return first matching downloaded file
+   */
   public static File searchFile(final String fileName) {
     return searchFile(Configuration.downloadsFolder, fileName);
   }

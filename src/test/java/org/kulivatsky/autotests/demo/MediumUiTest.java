@@ -15,9 +15,12 @@ import static org.kulivatsky.autotests.core.config.TestType.Option.REGRESSION;
 import static org.kulivatsky.autotests.core.step.SelenideSteps.open;
 import static org.kulivatsky.autotests.core.step.Steps.step;
 
+/** UI example showing Selenide configuration, framework navigation steps, and a page object. */
 public final class MediumUiTest {
+  /** Local server that hosts the demo catalog page. */
   private DemoServer server;
 
+  /** Configures a headless browser and starts the local catalog server. */
   @BeforeMethod
   public void setUp() {
     Configuration.headless = true;
@@ -25,11 +28,13 @@ public final class MediumUiTest {
     this.server = new DemoServer();
   }
 
+  /** Stops the local HTTP server; WebDriver cleanup is handled by the framework listener. */
   @AfterMethod(alwaysRun = true)
   public void tearDown() {
     this.server.close();
   }
 
+  /** Demonstrates a simple page-object flow that mutates and verifies browser UI state. */
   @Test(groups = "ui")
   @TestInfo(
     name = "Add a catalog product to the cart",

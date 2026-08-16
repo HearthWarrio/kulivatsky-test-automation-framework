@@ -17,19 +17,29 @@ import static org.kulivatsky.autotests.core.step.ResponseSteps.responseStatusCod
 import static org.kulivatsky.autotests.core.step.StepContexts.stepContext;
 import static org.kulivatsky.autotests.demo.api.DemoApiSteps.getOrder;
 
+/**
+ * Small API example showing a minimal test shape: request step, fluent response checks,
+ * and launch metadata.
+ */
 public final class EasyApiTest {
+  /** Local HTTP server owned by the current test method. */
   private DemoServer server;
 
+  /** Starts an isolated local demo server before each test method. */
   @BeforeMethod
   public void setUp() {
     this.server = new DemoServer();
   }
 
+  /** Stops the local server even when the test method fails. */
   @AfterMethod(alwaysRun = true)
   public void tearDown() {
     this.server.close();
   }
 
+  /**
+   * Demonstrates a read-only API smoke check with status, payload, and schema assertions.
+   */
   @Test
   @TestInfo(
     name = "Get an existing order",

@@ -9,10 +9,23 @@ import java.util.concurrent.TimeUnit;
 
 import static org.kulivatsky.autotests.core.step.Params.params;
 
+/** Step descriptors for publishing records through an existing Kafka producer. */
 public final class KafkaSteps {
+  /** No instances. */
   private KafkaSteps() {
   }
 
+  /**
+   * Creates a synchronous publish step with a ten-second acknowledgement timeout.
+   *
+   * @param producer producer owned by the caller; this step never closes it
+   * @param topic destination topic
+   * @param key record key
+   * @param value record value
+   * @param <K> key type
+   * @param <V> value type
+   * @return lazy step that produces broker metadata after acknowledgement
+   */
   public static <K, V> SupplierStep<RecordMetadata> send(final Producer<K, V> producer,
                                                           final String topic,
                                                           final K key,
@@ -20,6 +33,22 @@ public final class KafkaSteps {
     return send(producer, topic, key, value, Duration.ofSeconds(10));
   }
 
+  /**
+   * Creates a synchronous publish step with an explicit acknowledgement timeout.
+   *
+   * <p>{@link Producer#send(ProducerRecord)} is asynchronous, but the step waits on the returned
+   * future so a successful Allure step means the broker acknowledged the record. Producer
+   * ownership remains with the caller.</p>
+   *
+   * @param producer producer used to send the record; not closed by the step
+   * @param topic destination topic
+   * @param key record key
+   * @param value record value
+   * @param timeout maximum time to wait for broker acknowledgement
+   * @param <K> key type
+   * @param <V> value type
+   * @return lazy step producing {@link RecordMetadata}
+   */
   public static <K, V> SupplierStep<RecordMetadata> send(final Producer<K, V> producer,
                                                           final String topic,
                                                           final K key,

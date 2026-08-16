@@ -14,24 +14,66 @@ import java.util.List;
 import java.util.Properties;
 import java.util.concurrent.TimeUnit;
 
+/**
+ * Small string-key/string-value Kafka facade for tests that do not need long-lived clients.
+ *
+ * <p>Every {@link #send(String, String, String)} call creates and closes its own producer. Every
+ * {@link #poll(String, Duration)} call creates, subscribes, polls, and closes its own consumer.
+ * This keeps ownership simple at the cost of connection setup per operation. Tests that need to
+ * reuse a client should obtain one from
+ * {@link org.kulivatsky.autotests.core.storage.KafkaStorage} instead.</p>
+ */
 public final class Kafka {
+  /** Defensive copy of Kafka client properties. */
   private final Properties properties;
+  /** Maximum acknowledgement wait used by {@link #send(String, String, String)}. */
   private final Duration timeout;
 
+  /**
+   * Creates a facade from a defensive copy of client properties.
+   *
+   * @param properties Kafka client properties
+   * @param timeout producer acknowledgement timeout
+   */
   private Kafka(final Properties properties, final Duration timeout) {
     this.properties = new Properties();
     this.properties.putAll(properties);
     this.timeout = timeout;
   }
 
+  /**
+   * Creates a facade with a ten-second producer acknowledgement timeout.
+   *
+   * @param properties Kafka client properties; copied immediately
+   * @return Kafka facade
+   */
   public static Kafka of(final Properties properties) {
     return new Kafka(properties, Duration.ofSeconds(10));
   }
 
+  /**
+   * Creates a facade with an explicit producer acknowledgement timeout.
+   *
+   * @param properties Kafka client properties; copied immediately
+   * @param timeout maximum wait for producer acknowledgement
+   * @return Kafka facade
+   */
   public static Kafka of(final Properties properties, final Duration timeout) {
     return new Kafka(properties, timeout);
   }
 
+  /**
+   * Sends one record and waits synchronously for broker acknowledgement.
+   *
+   * <p>The producer is always closed before this method returns. A successful return therefore
+   * includes both acknowledged send and producer cleanup.</p>
+   *
+   * @param topic destination topic
+   * @param key record key
+   * @param value record value
+   * @return broker metadata for the acknowledged record
+   * @throws IllegalStateException when client creation, send, acknowledgement wait, or close fails
+   */
   public RecordMetadata send(final String topic, final String key, final String value) {
     try (KafkaProducer<String, String> producer = new KafkaProducer<>(this.properties)) {
       return producer.send(new ProducerRecord<>(topic, key, value))
@@ -41,6 +83,17 @@ public final class Kafka {
     }
   }
 
+  /**
+   * Subscribes a temporary consumer to one topic and performs a single Kafka poll.
+   *
+   * <p>This method does not loop until records arrive. An empty list is a valid result when the
+   * single poll returns no records. {@code auto.offset.reset=earliest} is supplied only if the
+   * caller's properties did not already configure another policy.</p>
+   *
+   * @param topic topic to subscribe to
+   * @param pollDuration maximum duration of the single consumer poll
+   * @return records returned by that poll, in Kafka iteration order
+   */
   public List<ConsumerRecord<String, String>> poll(final String topic, final Duration pollDuration) {
     final Properties consumerProperties = new Properties();
     consumerProperties.putAll(this.properties);
@@ -54,10 +107,20 @@ public final class Kafka {
     }
   }
 
+  /**
+   * Alias for {@link #properties()} retained for bean-style callers.
+   *
+   * @return defensive copy of client properties
+   */
   public Properties getProperties() {
     return properties();
   }
 
+  /**
+   * Returns a defensive copy of the stored Kafka properties.
+   *
+   * @return independent mutable properties object
+   */
   public Properties properties() {
     final Properties copy = new Properties();
     copy.putAll(this.properties);

@@ -9,18 +9,39 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import java.io.IOException;
 import java.io.InputStream;
 
+/** Owns the shared Jackson mapper and the JSON conversions used by framework code. */
 public final class JsonUtils {
+  /**
+   * Process-wide mapper with Java time support and ISO-style date/time serialization rather than
+   * numeric timestamps.
+   *
+   * <p>The same mutable mapper instance is returned by {@link #objectMapper()}. Framework users
+   * should treat its configuration as global state.</p>
+   */
   private static final ObjectMapper MAPPER = new ObjectMapper()
     .registerModule(new JavaTimeModule())
     .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
 
+  /** No instances. */
   private JsonUtils() {
   }
 
+  /**
+   * Returns the framework's shared Jackson mapper.
+   *
+   * @return shared mutable mapper instance
+   */
   public static ObjectMapper objectMapper() {
     return MAPPER;
   }
 
+  /**
+   * Parses JSON text into a Jackson tree.
+   *
+   * @param json JSON document
+   * @return parsed tree
+   * @throws IllegalArgumentException when the text is not valid JSON
+   */
   public static JsonNode jsonNode(final String json) {
     try {
       return MAPPER.readTree(json);
@@ -29,6 +50,13 @@ public final class JsonUtils {
     }
   }
 
+  /**
+   * Serializes an object with the shared mapper.
+   *
+   * @param value object to serialize
+   * @return compact JSON text
+   * @throws IllegalArgumentException when Jackson cannot serialize the value
+   */
   public static String toJson(final Object value) {
     try {
       return MAPPER.writeValueAsString(value);
@@ -37,6 +65,13 @@ public final class JsonUtils {
     }
   }
 
+  /**
+   * Serializes an object with Jackson's default pretty printer.
+   *
+   * @param value object to serialize
+   * @return formatted JSON text
+   * @throws IllegalArgumentException when Jackson cannot serialize the value
+   */
   public static String prettyJson(final Object value) {
     try {
       return MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(value);
@@ -45,6 +80,14 @@ public final class JsonUtils {
     }
   }
 
+  /**
+   * Reads and parses a JSON resource from the classpath.
+   *
+   * @param resourcePath classpath-relative resource path
+   * @return parsed JSON tree
+   * @throws IllegalArgumentException when the resource does not exist
+   * @throws IllegalStateException when the resource cannot be read or parsed
+   */
   public static JsonNode readResource(final String resourcePath) {
     try (InputStream input = JsonUtils.class.getClassLoader().getResourceAsStream(resourcePath)) {
       if (input == null) {
