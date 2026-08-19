@@ -11,8 +11,10 @@ import org.apache.kafka.clients.producer.RecordMetadata;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Properties;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Predicate;
 
 /**
  * Small string-key/string-value Kafka facade for tests that do not need long-lived clients.
@@ -24,8 +26,10 @@ import java.util.concurrent.TimeUnit;
  * {@link org.kulivatsky.autotests.core.storage.KafkaStorage} instead.</p>
  */
 public final class Kafka {
-  /** Defensive copy of Kafka client properties. */
-  private final Properties properties;
+  /** Defensive producer properties used by short-lived send operations. */
+  private final Properties producerProperties;
+  /** Defensive consumer properties used by short-lived poll operations. */
+  private final Properties consumerProperties;
   /** Maximum acknowledgement wait used by {@link #send(String, String, String)}. */
   private final Duration timeout;
 
@@ -35,10 +39,12 @@ public final class Kafka {
    * @param properties Kafka client properties
    * @param timeout producer acknowledgement timeout
    */
-  private Kafka(final Properties properties, final Duration timeout) {
-    this.properties = new Properties();
-    this.properties.putAll(properties);
-    this.timeout = timeout;
+  private Kafka(final Properties producerProperties,
+                final Properties consumerProperties,
+                final Duration timeout) {
+    this.producerProperties = copyOf(producerProperties, "producerProperties");
+    this.consumerProperties = copyOf(consumerProperties, "consumerProperties");
+    this.timeout = requirePositive(timeout, "timeout");
   }
 
   /**
@@ -48,7 +54,21 @@ public final class Kafka {
    * @return Kafka facade
    */
   public static Kafka of(final Properties properties) {
-    return new Kafka(properties, Duration.ofSeconds(10));
+    return new Kafka(properties, properties, Duration.ofSeconds(10));
+  }
+
+  /**
+   * Creates a facade with separate producer and consumer settings.
+   *
+   * <p>This form prevents producer-only serializers and consumer-only deserializers/group settings
+   * from being passed to the wrong Kafka client. Both inputs are copied immediately.</p>
+   *
+   * @param producerProperties properties used only to construct producers
+   * @param consumerProperties properties used only to construct consumers
+   * @return Kafka facade with a ten-second producer acknowledgement timeout
+   */
+  public static Kafka of(final Properties producerProperties, final Properties consumerProperties) {
+    return new Kafka(producerProperties, consumerProperties, Duration.ofSeconds(10));
   }
 
   /**
@@ -59,7 +79,7 @@ public final class Kafka {
    * @return Kafka facade
    */
   public static Kafka of(final Properties properties, final Duration timeout) {
-    return new Kafka(properties, timeout);
+    return new Kafka(properties, properties, timeout);
   }
 
   /**
@@ -75,9 +95,9 @@ public final class Kafka {
    * @throws IllegalStateException when client creation, send, acknowledgement wait, or close fails
    */
   public RecordMetadata send(final String topic, final String key, final String value) {
-    try (KafkaProducer<String, String> producer = new KafkaProducer<>(this.properties)) {
+    try (KafkaProducer<String, String> producer = new KafkaProducer<>(this.producerProperties)) {
       return producer.send(new ProducerRecord<>(topic, key, value))
-        .get(this.timeout.toMillis(), TimeUnit.MILLISECONDS);
+        .get(this.timeout.toNanos(), TimeUnit.NANOSECONDS);
     } catch (final InterruptedException exception) {
       Thread.currentThread().interrupt();
       throw new IllegalStateException("Kafka send interrupted for topic " + topic, exception);
@@ -99,13 +119,32 @@ public final class Kafka {
    * @throws IllegalArgumentException when {@code pollDuration} is zero or negative
    */
   public List<ConsumerRecord<String, String>> poll(final String topic, final Duration pollDuration) {
-    if (pollDuration.isZero() || pollDuration.isNegative()) {
-      throw new IllegalArgumentException("pollDuration must be positive");
-    }
+    return poll(topic, record -> true, pollDuration);
+  }
+
+  /**
+   * Waits for records that satisfy a caller-supplied correlation predicate.
+   *
+   * <p>Non-matching records are consumed by the temporary consumer but are not returned and do not
+   * end the wait. This makes the method usable on shared topics where historical or parallel-test
+   * traffic may arrive before the record a test is interested in.</p>
+   *
+   * @param topic topic to subscribe to
+   * @param predicate correlation predicate applied to each consumed record
+   * @param pollDuration total time allowed for assignment and polling
+   * @return matching records from the first batch containing at least one match, or an empty list on timeout
+   * @throws IllegalArgumentException when {@code pollDuration} is zero or negative
+   */
+  public List<ConsumerRecord<String, String>> poll(final String topic,
+                                                    final Predicate<ConsumerRecord<String, String>> predicate,
+                                                    final Duration pollDuration) {
+    Objects.requireNonNull(topic, "topic");
+    Objects.requireNonNull(predicate, "predicate");
+    final Duration timeout = requirePositive(pollDuration, "pollDuration");
     final Properties consumerProperties = new Properties();
-    consumerProperties.putAll(this.properties);
+    consumerProperties.putAll(this.consumerProperties);
     consumerProperties.putIfAbsent(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
-    final long deadline = System.nanoTime() + pollDuration.toNanos();
+    final long deadline = deadline(timeout);
     try (KafkaConsumer<String, String> consumer = new KafkaConsumer<>(consumerProperties)) {
       consumer.subscribe(List.of(topic));
       while (true) {
@@ -115,13 +154,44 @@ public final class Kafka {
         }
         final Duration slice = Duration.ofNanos(Math.min(remainingNanos, Duration.ofMillis(250).toNanos()));
         final ConsumerRecords<String, String> records = consumer.poll(slice);
-        if (!records.isEmpty()) {
-          final List<ConsumerRecord<String, String>> result = new ArrayList<>(records.count());
-          records.forEach(result::add);
+        final List<ConsumerRecord<String, String>> result = new ArrayList<>();
+        records.forEach(record -> {
+          if (predicate.test(record)) {
+            result.add(record);
+          }
+        });
+        if (!result.isEmpty()) {
           return result;
         }
       }
     }
+  }
+
+  /** Converts a positive duration to a monotonic deadline and rejects values that cannot fit in nanoseconds. */
+  private static long deadline(final Duration duration) {
+    final long durationNanos;
+    try {
+      durationNanos = duration.toNanos();
+    } catch (final ArithmeticException ex) {
+      throw new IllegalArgumentException("pollDuration is too large", ex);
+    }
+    return System.nanoTime() + durationNanos;
+  }
+
+  /** Copies a caller-owned properties object before it can be mutated elsewhere. */
+  private static Properties copyOf(final Properties source, final String name) {
+    final Properties copy = new Properties();
+    copy.putAll(Objects.requireNonNull(source, name));
+    return copy;
+  }
+
+  /** Validates a timeout shared by producer and consumer operations. */
+  private static Duration requirePositive(final Duration duration, final String name) {
+    final Duration checked = Objects.requireNonNull(duration, name);
+    if (checked.isZero() || checked.isNegative()) {
+      throw new IllegalArgumentException(name + " must be positive");
+    }
+    return checked;
   }
 
   /**
@@ -140,7 +210,8 @@ public final class Kafka {
    */
   public Properties properties() {
     final Properties copy = new Properties();
-    copy.putAll(this.properties);
+    copy.putAll(this.producerProperties);
+    copy.putAll(this.consumerProperties);
     return copy;
   }
 }

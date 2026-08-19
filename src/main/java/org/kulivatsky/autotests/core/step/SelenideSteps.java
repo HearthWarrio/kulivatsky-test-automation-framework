@@ -106,19 +106,44 @@ public final class SelenideSteps {
     return WebDriverRunner.getWebDriver().manage().getCookies();
   }
 
-  /** Tries each current handle and restores the original handle when no window matches. */
+  /**
+   * Tries each current handle and restores the original handle when matching fails.
+   *
+   * <p>The original window is restored both when no match exists and when reading a candidate
+   * title/URL throws. A restoration failure is attached as a suppressed exception to the original
+   * matching failure rather than replacing it.</p>
+   */
   private static void switchToMatchingWindow(final java.util.function.Predicate<WebDriver> matcher,
                                              final String selectorName,
                                              final String selectorValue) {
     final WebDriver driver = WebDriverRunner.getWebDriver();
     final String originalHandle = driver.getWindowHandle();
-    for (final String handle : driver.getWindowHandles()) {
-      driver.switchTo().window(handle);
-      if (matcher.test(driver)) {
-        return;
+    try {
+      for (final String handle : driver.getWindowHandles()) {
+        driver.switchTo().window(handle);
+        if (matcher.test(driver)) {
+          return;
+        }
       }
+    } catch (final RuntimeException ex) {
+      restoreWindow(driver, originalHandle, ex);
+      throw ex;
     }
-    driver.switchTo().window(originalHandle);
-    throw new NoSuchElementException("No browser window with " + selectorName + ": " + selectorValue);
+    final NoSuchElementException notFound = new NoSuchElementException(
+      "No browser window with " + selectorName + ": " + selectorValue
+    );
+    restoreWindow(driver, originalHandle, notFound);
+    throw notFound;
+  }
+
+  /** Restores a previously active window without replacing the primary failure. */
+  private static void restoreWindow(final WebDriver driver,
+                                    final String handle,
+                                    final RuntimeException primaryFailure) {
+    try {
+      driver.switchTo().window(handle);
+    } catch (final RuntimeException restoreFailure) {
+      primaryFailure.addSuppressed(restoreFailure);
+    }
   }
 }

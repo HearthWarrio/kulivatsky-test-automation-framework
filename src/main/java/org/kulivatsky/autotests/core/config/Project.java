@@ -37,7 +37,32 @@ public interface Project {
    */
   static Project of(final String id) {
     final String normalized = normalize(id);
-    return () -> normalized;
+    return new Project() {
+      /** {@inheritDoc} */
+      @Override
+      public String id() {
+        return normalized;
+      }
+
+      /** Compares factory-created project identifiers by their normalized id. */
+      @Override
+      public boolean equals(final Object other) {
+        return this == other || other != null && this.getClass() == other.getClass()
+          && normalized.equals(((Project) other).id());
+      }
+
+      /** Returns a hash derived from the normalized id. */
+      @Override
+      public int hashCode() {
+        return normalized.hashCode();
+      }
+
+      /** Returns the normalized project id. */
+      @Override
+      public String toString() {
+        return normalized;
+      }
+    };
   }
 
   /**

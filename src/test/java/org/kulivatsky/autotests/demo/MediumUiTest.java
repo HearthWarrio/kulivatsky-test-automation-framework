@@ -30,7 +30,9 @@ public final class MediumUiTest {
   /** Stops the local HTTP server; WebDriver cleanup is handled by the framework listener. */
   @AfterMethod(alwaysRun = true)
   public void tearDown() {
-    this.server.close();
+    if (this.server != null) {
+      this.server.close();
+    }
   }
 
   /** Demonstrates a simple page-object flow that mutates and verifies browser UI state. */

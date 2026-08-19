@@ -5,6 +5,7 @@ import com.codeborne.selenide.WebDriverRunner;
 import com.codeborne.selenide.logevents.SelenideLogger;
 import io.qameta.allure.selenide.AllureSelenide;
 import io.restassured.RestAssured;
+import io.restassured.config.RestAssuredConfig;
 import org.kulivatsky.autotests.core.annotation.Disabled;
 import org.kulivatsky.autotests.core.annotation.TestInfo;
 import org.kulivatsky.autotests.core.config.Config;
@@ -31,6 +32,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.NoSuchElementException;
+import java.util.UUID;
 
 /**
  * Opt-in TestNG integration for launch filtering, framework lifecycle, and browser diagnostics.
@@ -49,8 +51,17 @@ import java.util.NoSuchElementException;
 public final class TestNGListener implements IExecutionListener, IInvokedMethodListener, IAnnotationTransformer {
   /** Logger used for lifecycle messages and non-fatal diagnostic failures. */
   private static final Logger LOGGER = LoggerFactory.getLogger(TestNGListener.class);
+  /** Unique Selenide listener key owned by this listener instance. */
+  private final String selenideListenerName = TestNGListener.class.getName() + ".allure." + UUID.randomUUID();
   /** Test result associated with the thread currently executing a TestNG test method. */
   private static final ThreadLocal<ITestResult> CURRENT_TEST = new ThreadLocal<>();
+
+  /** REST Assured configuration that was active before this listener changed global defaults. */
+  private RestAssuredConfig previousRestAssuredConfig;
+  /** Whether this listener has taken ownership of the current REST Assured configuration. */
+  private boolean restAssuredConfigured;
+  /** Whether the default Selenide driver should be closed after each test method. */
+  private boolean closeBrowserAfterTest = true;
 
   /**
    * Returns the TestNG result bound to the current thread.
@@ -75,18 +86,51 @@ public final class TestNGListener implements IExecutionListener, IInvokedMethodL
    */
   @Override
   public void onExecutionStart() {
-    RestAssured.config = RestAssuredConfigStorage.config();
-    if (Config.current().booleanProperty("rest.logOnValidationFailure", false)) {
-      RestAssured.enableLoggingOfRequestAndResponseIfValidationFails();
+    final Config config = Config.current();
+    final boolean logOnValidationFailure = config.booleanProperty("rest.logOnValidationFailure", false);
+    this.closeBrowserAfterTest = config.booleanProperty("browser.closeAfterTest", true);
+    this.previousRestAssuredConfig = RestAssured.config;
+    try {
+      RestAssured.config = RestAssuredConfigStorage.config();
+      this.restAssuredConfigured = true;
+      if (logOnValidationFailure) {
+        RestAssured.enableLoggingOfRequestAndResponseIfValidationFails();
+      }
+      SelenideLogger.addListener(
+        this.selenideListenerName,
+        new AllureSelenide().screenshots(false).savePageSource(false)
+      );
+    } catch (final RuntimeException ex) {
+      try {
+        SelenideLogger.removeListener(this.selenideListenerName);
+      } catch (final RuntimeException cleanupException) {
+        ex.addSuppressed(cleanupException);
+      }
+      restoreRestAssuredConfig();
+      throw ex;
     }
-    SelenideLogger.addListener("AllureSelenide", new AllureSelenide().screenshots(false).savePageSource(false));
   }
 
-  /** Releases shared database pools and the Selenide report listener after the TestNG execution. */
+  /**
+   * Releases framework-owned resources and restores REST Assured global state after the execution.
+   *
+   * <p>Cleanup is best-effort. Failure to remove a report listener or restore a global default is
+   * logged rather than allowed to replace the test execution result.</p>
+   */
   @Override
   public void onExecutionFinish() {
-    DBConnectionPoolStorage.closeAll();
-    SelenideLogger.removeListener("AllureSelenide");
+    try {
+      DBConnectionPoolStorage.closeAll();
+    } catch (final RuntimeException ex) {
+      LOGGER.warn("Unable to close KTAF database pools", ex);
+    }
+    try {
+      SelenideLogger.removeListener(this.selenideListenerName);
+    } catch (final RuntimeException ex) {
+      LOGGER.warn("Unable to remove KTAF Selenide listener", ex);
+    } finally {
+      restoreRestAssuredConfig();
+    }
   }
 
   /**
@@ -149,10 +193,12 @@ public final class TestNGListener implements IExecutionListener, IInvokedMethodL
   }
 
   /**
-   * Attaches browser diagnostics after failures and closes Selenide's default driver after each test.
+   * Attaches browser diagnostics after failures and optionally closes Selenide's default driver.
    *
    * <p>The thread-local binding is always cleared, including when diagnostics or browser shutdown
-   * fail. Diagnostic failures are logged and never replace the original test result.</p>
+   * fail. Diagnostic failures are logged and never replace the original test result. Browser
+   * shutdown is controlled by {@code browser.closeAfterTest} and defaults to {@code true}; consumers
+   * that deliberately reuse one session across methods may disable it.</p>
    */
   @Override
   public void afterInvocation(final IInvokedMethod method, final ITestResult testResult) {
@@ -163,7 +209,7 @@ public final class TestNGListener implements IExecutionListener, IInvokedMethodL
       if (testResult.getStatus() == ITestResult.FAILURE) {
         attachBrowserState();
       }
-      if (WebDriverRunner.hasWebDriverStarted()) {
+      if (this.closeBrowserAfterTest && WebDriverRunner.hasWebDriverStarted()) {
         try {
           Selenide.closeWebDriver();
         } catch (final RuntimeException ex) {
@@ -212,6 +258,21 @@ public final class TestNGListener implements IExecutionListener, IInvokedMethodL
       }
     } catch (final RuntimeException ex) {
       LOGGER.warn("Unable to attach browser diagnostics", ex);
+    }
+  }
+
+  /** Restores the REST Assured configuration captured at execution start. */
+  private void restoreRestAssuredConfig() {
+    if (!this.restAssuredConfigured && this.previousRestAssuredConfig == null) {
+      return;
+    }
+    try {
+      RestAssured.config = this.previousRestAssuredConfig;
+    } catch (final RuntimeException ex) {
+      LOGGER.warn("Unable to restore REST Assured configuration", ex);
+    } finally {
+      this.previousRestAssuredConfig = null;
+      this.restAssuredConfigured = false;
     }
   }
 

@@ -8,6 +8,8 @@ import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Materializes a classpath resource as a {@link File} for APIs that cannot consume streams.
@@ -20,6 +22,9 @@ import java.nio.file.StandardCopyOption;
  * URL directly to {@link File} does not work.</p>
  */
 public final class ResourceFile {
+  /** One materialized temporary file per non-file classpath resource URL. */
+  private static final Map<String, File> MATERIALIZED = new ConcurrentHashMap<>();
+
   /** No instances. */
   private ResourceFile() {
   }
@@ -45,6 +50,26 @@ public final class ResourceFile {
       }
     }
 
+    final String cacheKey = resource.toExternalForm();
+    synchronized (MATERIALIZED) {
+      final File cached = MATERIALIZED.get(cacheKey);
+      if (cached != null && cached.isFile()) {
+        return cached;
+      }
+      final File materialized = materialize(resource, resourcePath);
+      MATERIALIZED.put(cacheKey, materialized);
+      return materialized;
+    }
+  }
+
+  /**
+   * Copies one non-file classpath resource to a temporary file.
+   *
+   * @param resource resolved classpath URL
+   * @param resourcePath original classpath-relative path used for diagnostics and suffix selection
+   * @return materialized temporary file
+   */
+  private static File materialize(final URL resource, final String resourcePath) {
     final String suffix = suffix(resourcePath);
     try (InputStream input = resource.openStream()) {
       final Path temp = Files.createTempFile("autotest-resource-", suffix);
@@ -59,11 +84,16 @@ public final class ResourceFile {
   /**
    * Preserves the original filename suffix for a temporary materialized resource.
    *
+   * <p>Dots in parent directory names are ignored. A path such as
+   * {@code schema.v1/order} therefore receives {@code .tmp}, while
+   * {@code schema.v1/order.json} receives {@code .json}.</p>
+   *
    * @param path resource path
-   * @return substring from the final dot onward, or {@code .tmp} when no dot exists
+   * @return substring from the filename's final dot onward, or {@code .tmp} when no suffix exists
    */
   private static String suffix(final String path) {
+    final int separator = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
     final int dot = path.lastIndexOf('.');
-    return dot >= 0 ? path.substring(dot) : ".tmp";
+    return dot > separator && dot < path.length() - 1 ? path.substring(dot) : ".tmp";
   }
 }

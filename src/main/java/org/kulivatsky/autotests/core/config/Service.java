@@ -40,7 +40,32 @@ public interface Service {
    */
   static Service of(final String id) {
     final String normalized = normalize(id, "service");
-    return () -> normalized;
+    return new Service() {
+      /** {@inheritDoc} */
+      @Override
+      public String id() {
+        return normalized;
+      }
+
+      /** Compares factory-created service identifiers by their normalized id. */
+      @Override
+      public boolean equals(final Object other) {
+        return this == other || other != null && this.getClass() == other.getClass()
+          && normalized.equals(((Service) other).id());
+      }
+
+      /** Returns a hash derived from the normalized id. */
+      @Override
+      public int hashCode() {
+        return normalized.hashCode();
+      }
+
+      /** Returns the normalized service id. */
+      @Override
+      public String toString() {
+        return normalized;
+      }
+    };
   }
 
   /**

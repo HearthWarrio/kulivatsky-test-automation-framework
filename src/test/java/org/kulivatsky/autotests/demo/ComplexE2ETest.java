@@ -42,7 +42,9 @@ public final class ComplexE2ETest {
   /** Stops all server executors and sockets after each test method. */
   @AfterMethod(alwaysRun = true)
   public void tearDown() {
-    this.server.close();
+    if (this.server != null) {
+      this.server.close();
+    }
   }
 
   /**

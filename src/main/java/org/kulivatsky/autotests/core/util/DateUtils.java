@@ -1,7 +1,6 @@
 package org.kulivatsky.autotests.core.util;
 
-import java.sql.Timestamp;
-import java.text.ParseException;
+import java.text.ParsePosition;
 import java.text.SimpleDateFormat;
 import java.time.Clock;
 import java.time.Duration;
@@ -120,16 +119,18 @@ public final class DateUtils {
   }
 
   /**
-   * Converts timezone-free local fields to a JDBC timestamp without applying any timezone.
+   * Converts timezone-free local fields to a deterministic legacy date by interpreting them as UTC.
    *
-   * <p>Use {@link #dateOf(LocalDateTime, ZoneId)} when those fields represent local time in a
-   * specific timezone.</p>
+   * <p>A {@link Date} is an absolute instant and cannot preserve timezone-free fields by itself.
+   * Interpreting the value as UTC avoids the JVM-default-timezone dependency of
+   * {@link java.sql.Timestamp#valueOf(LocalDateTime)}. Use {@link #dateOf(LocalDateTime, ZoneId)} when the
+   * fields represent local time in a specific timezone.</p>
    *
-   * @param localDateTime local calendar fields
-   * @return timestamp with the same local fields
+   * @param localDateTime local calendar fields interpreted as UTC
+   * @return date representing those fields at UTC
    */
   public static Date dateOf(final LocalDateTime localDateTime) {
-    return Timestamp.valueOf(Objects.requireNonNull(localDateTime, "localDateTime"));
+    return dateOf(Objects.requireNonNull(localDateTime, "localDateTime").toInstant(ZoneOffset.UTC));
   }
 
   /**
@@ -170,11 +171,12 @@ public final class DateUtils {
   public static Date dateOf(final String format, final String value) {
     final SimpleDateFormat formatter = new SimpleDateFormat(format);
     formatter.setLenient(false);
-    try {
-      return formatter.parse(value);
-    } catch (final ParseException ex) {
-      throw new IllegalArgumentException("Unable to parse date '" + value + "' with format '" + format + "'", ex);
+    final ParsePosition position = new ParsePosition(0);
+    final Date parsed = formatter.parse(value, position);
+    if (parsed == null || position.getErrorIndex() >= 0 || position.getIndex() != value.length()) {
+      throw new IllegalArgumentException("Unable to parse date '" + value + "' with format '" + format + "'");
     }
+    return parsed;
   }
 
   /** @return parsed date using {@code yyyy-MM-dd} */

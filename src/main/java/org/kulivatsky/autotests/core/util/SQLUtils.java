@@ -7,10 +7,12 @@ import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.Set;
 
 /**
  * Low-level JDBC operations with deterministic resource cleanup.
@@ -88,13 +90,9 @@ public final class SQLUtils {
          PreparedStatement statement = prepare(connection, sql, params);
          ResultSet resultSet = statement.executeQuery()) {
       final List<Map<String, Object>> rows = new ArrayList<>();
-      final ResultSetMetaData metadata = resultSet.getMetaData();
+      final List<String> labels = columnLabels(resultSet.getMetaData());
       while (resultSet.next()) {
-        final Map<String, Object> row = new LinkedHashMap<>();
-        for (int column = 1; column <= metadata.getColumnCount(); column++) {
-          row.put(metadata.getColumnLabel(column), resultSet.getObject(column));
-        }
-        rows.add(row);
+        rows.add(readRow(resultSet, labels));
       }
       return rows;
     } catch (final SQLException ex) {
@@ -115,14 +113,55 @@ public final class SQLUtils {
   public static Map<String, Object> selectOne(final DataSource dataSource,
                                                final String sql,
                                                final Object... params) {
-    final List<Map<String, Object>> rows = select(dataSource, sql, params);
-    if (rows.isEmpty()) {
-      throw new NoSuchElementException("SQL query returned no rows");
+    try (Connection connection = dataSource.getConnection();
+         PreparedStatement statement = prepare(connection, sql, params);
+         ResultSet resultSet = statement.executeQuery()) {
+      final List<String> labels = columnLabels(resultSet.getMetaData());
+      if (!resultSet.next()) {
+        throw new NoSuchElementException("SQL query returned no rows");
+      }
+      final Map<String, Object> row = readRow(resultSet, labels);
+      if (resultSet.next()) {
+        throw new IllegalStateException("Expected one SQL row, got more than one");
+      }
+      return row;
+    } catch (final SQLException ex) {
+      throw new IllegalStateException("SQL select failed", ex);
     }
-    if (rows.size() > 1) {
-      throw new IllegalStateException("Expected one SQL row, got " + rows.size());
+  }
+
+  /**
+   * Reads and validates JDBC column labels before any row is converted to a map.
+   *
+   * <p>Duplicate labels are rejected because a map cannot represent both values without silently
+   * overwriting one. Use explicit SQL aliases when a query returns same-named columns.</p>
+   *
+   * @param metadata result-set metadata
+   * @return column labels in JDBC order
+   * @throws SQLException when the driver cannot expose column metadata
+   * @throws IllegalStateException when two columns have the same label
+   */
+  private static List<String> columnLabels(final ResultSetMetaData metadata) throws SQLException {
+    final List<String> labels = new ArrayList<>(metadata.getColumnCount());
+    final Set<String> unique = new HashSet<>();
+    for (int column = 1; column <= metadata.getColumnCount(); column++) {
+      final String label = metadata.getColumnLabel(column);
+      if (!unique.add(label)) {
+        throw new IllegalStateException("Duplicate SQL column label '" + label + "'; use explicit aliases");
+      }
+      labels.add(label);
     }
-    return rows.getFirst();
+    return labels;
+  }
+
+  /** Reads the current result-set row using already validated column labels. */
+  private static Map<String, Object> readRow(final ResultSet resultSet,
+                                              final List<String> labels) throws SQLException {
+    final Map<String, Object> row = new LinkedHashMap<>();
+    for (int index = 0; index < labels.size(); index++) {
+      row.put(labels.get(index), resultSet.getObject(index + 1));
+    }
+    return row;
   }
 
   /**

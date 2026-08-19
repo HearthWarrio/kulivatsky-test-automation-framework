@@ -5,6 +5,8 @@ import org.kulivatsky.autotests.core.config.Service;
 import org.kulivatsky.autotests.core.config.Config;
 import org.kulivatsky.autotests.core.config.Env;
 import org.kulivatsky.autotests.core.util.Database;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.sql.SQLException;
 import java.util.Locale;
@@ -22,8 +24,12 @@ import java.util.concurrent.ConcurrentHashMap;
  * cleanup is safe because the storage is cleared after closing.</p>
  */
 public final class DBConnectionPoolStorage {
+  /** Logger used for best-effort shutdown diagnostics. */
+  private static final Logger LOGGER = LoggerFactory.getLogger(DBConnectionPoolStorage.class);
   /** Cached pools indexed by their configuration prefix. */
   private static final Map<String, BasicDataSource> STORAGE = new ConcurrentHashMap<>();
+  /** Serializes pool lookup/replacement with process-wide shutdown cleanup. */
+  private static final Object LIFECYCLE_LOCK = new Object();
 
   static {
     Runtime.getRuntime().addShutdownHook(new Thread(DBConnectionPoolStorage::closeAll, "database-pool-shutdown"));
@@ -42,16 +48,15 @@ public final class DBConnectionPoolStorage {
    */
   public static Database databaseFor(final Service service, final Env env) {
     final String prefix = "db.%s.%s".formatted(service.id(), normalize(env));
-    final BasicDataSource dataSource = STORAGE.computeIfAbsent(prefix, DBConnectionPoolStorage::createDataSource);
-    return Database.shared(dataSource);
+    return Database.shared(dataSourceFor(prefix));
   }
 
   /**
    * Returns the shared Apache DBCP pool itself.
    *
-   * <p>The storage owns this object. Callers that close it directly invalidate the cached pool for
-   * every other user of the same service/environment pair. Prefer {@link #databaseFor(Service, Env)}
-   * unless direct pool configuration or inspection is required.</p>
+   * <p>The storage owns this object. Prefer {@link #databaseFor(Service, Env)} unless direct pool
+   * inspection is required. If a caller closes the returned pool, the next storage lookup detects
+   * the closed instance and recreates it from configuration.</p>
    *
    * @param service logical database service
    * @param env target environment
@@ -59,24 +64,48 @@ public final class DBConnectionPoolStorage {
    */
   public static BasicDataSource dbConnectionPoolFor(final Service service, final Env env) {
     final String prefix = "db.%s.%s".formatted(service.id(), normalize(env));
-    return STORAGE.computeIfAbsent(prefix, DBConnectionPoolStorage::createDataSource);
+    return dataSourceFor(prefix);
   }
 
   /**
    * Closes every cached pool and clears the storage.
    *
-   * <p>Cleanup is best-effort: an {@link SQLException} from one pool is ignored so shutdown can
-   * continue and the JVM is not kept alive by cleanup code.</p>
+   * <p>Lookup and shutdown are serialized so a pool cannot be inserted into the cache while
+   * {@code closeAll()} is clearing it. Cleanup remains best-effort: one close failure is logged and
+   * does not prevent the remaining pools from being released.</p>
    */
   public static void closeAll() {
-    STORAGE.values().forEach(dataSource -> {
-      try {
-        dataSource.close();
-      } catch (final SQLException ignored) {
-        // Shutdown cleanup must not prevent JVM termination.
+    synchronized (LIFECYCLE_LOCK) {
+      STORAGE.values().forEach(dataSource -> {
+        try {
+          dataSource.close();
+        } catch (final SQLException ex) {
+          LOGGER.warn("Unable to close database connection pool", ex);
+        }
+      });
+      STORAGE.clear();
+    }
+  }
+
+  /**
+   * Returns a live cached pool, recreating it if a caller closed the exposed DBCP instance.
+   *
+   * @param prefix database configuration prefix
+   * @return live shared pool
+   */
+  private static BasicDataSource dataSourceFor(final String prefix) {
+    synchronized (LIFECYCLE_LOCK) {
+      final BasicDataSource existing = STORAGE.get(prefix);
+      if (existing != null && !existing.isClosed()) {
+        return existing;
       }
-    });
-    STORAGE.clear();
+      if (existing != null) {
+        STORAGE.remove(prefix, existing);
+      }
+      final BasicDataSource created = createDataSource(prefix);
+      STORAGE.put(prefix, created);
+      return created;
+    }
   }
 
   /**

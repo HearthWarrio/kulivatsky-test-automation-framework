@@ -8,6 +8,7 @@ import static io.restassured.module.jsv.JsonSchemaValidator.matchesJsonSchemaInC
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.kulivatsky.autotests.core.step.Params.params;
+import static org.kulivatsky.autotests.core.step.Params.secret;
 
 /** Lazy assertions and value extraction for REST Assured responses. */
 public final class ResponseSteps {
@@ -32,6 +33,9 @@ public final class ResponseSteps {
   /**
    * Creates a step that checks one response header for exact string equality.
    *
+   * <p>The expected value is masked in Allure regardless of the header name. This prevents a
+   * credential-bearing header from leaking through the generic {@code expectedValue} parameter.</p>
+   *
    * @param header header name
    * @param expectedValue exact expected value
    * @return response-consuming assertion step
@@ -39,7 +43,7 @@ public final class ResponseSteps {
   public static ConsumerStep<Response> responseHeaderIs(final String header, final String expectedValue) {
     return new ConsumerStep.Of<>(
       "Response header has expected value",
-      params("header", header, "expectedValue", expectedValue),
+      params("header", header, "expectedValue", secret(expectedValue)),
       response -> response.then().header(header, equalTo(expectedValue))
     );
   }
@@ -47,19 +51,26 @@ public final class ResponseSteps {
   /**
    * Creates a step that checks whether the raw response body contains text.
    *
+   * <p>The expected text is masked in Allure because arbitrary response fragments may themselves
+   * be credentials, tokens, identifiers, or personal data.</p>
+   *
    * @param expectedText text that must occur in the response body
    * @return response-consuming assertion step
    */
   public static ConsumerStep<Response> responseBodyContains(final String expectedText) {
     return new ConsumerStep.Of<>(
       "Response body contains expected text",
-      params("expectedText", expectedText),
+      params("expectedText", secret(expectedText)),
       response -> response.then().body(containsString(expectedText))
     );
   }
 
   /**
    * Creates a step that checks a REST Assured JSON-path expression for exact equality.
+   *
+   * <p>The expected value is masked in Allure. A JSON path such as {@code access_token} identifies
+   * sensitive data, but once stored as a generic {@code expectedValue} parameter the value cannot
+   * be classified safely by name alone.</p>
    *
    * @param jsonPath REST Assured JSON-path expression
    * @param expectedValue expected decoded value
@@ -68,7 +79,7 @@ public final class ResponseSteps {
   public static ConsumerStep<Response> responseJsonValueIs(final String jsonPath, final Object expectedValue) {
     return new ConsumerStep.Of<>(
       "Response JSON value matches",
-      params("jsonPath", jsonPath, "expectedValue", expectedValue),
+      params("jsonPath", jsonPath, "expectedValue", secret(expectedValue)),
       response -> response.then().body(jsonPath, equalTo(expectedValue))
     );
   }

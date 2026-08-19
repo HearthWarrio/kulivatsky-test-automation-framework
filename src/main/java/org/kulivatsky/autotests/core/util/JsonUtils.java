@@ -15,8 +15,8 @@ public final class JsonUtils {
    * Process-wide mapper with Java time support and ISO-style date/time serialization rather than
    * numeric timestamps.
    *
-   * <p>The same mutable mapper instance is returned by {@link #objectMapper()}. Framework users
-   * should treat its configuration as global state.</p>
+   * <p>The instance is private to framework code. {@link #objectMapper()} returns a configured copy
+   * so callers cannot mutate JSON behavior for unrelated or parallel tests.</p>
    */
   private static final ObjectMapper MAPPER = new ObjectMapper()
     .registerModule(new JavaTimeModule())
@@ -27,12 +27,15 @@ public final class JsonUtils {
   }
 
   /**
-   * Returns the framework's shared Jackson mapper.
+   * Returns an independently configurable copy of the framework Jackson mapper.
    *
-   * @return shared mutable mapper instance
+   * <p>Changing the returned mapper never changes serialization or parsing performed by this
+   * utility class.</p>
+   *
+   * @return configured mapper copy owned by the caller
    */
   public static ObjectMapper objectMapper() {
-    return MAPPER;
+    return MAPPER.copy();
   }
 
   /**

@@ -10,13 +10,15 @@ import java.util.regex.Pattern;
 public final class AllureUtils {
   /** Replacement used for values recognized as credentials or session material. */
   private static final String MASK = "***";
+  /** Extra characters scanned beyond the visible attachment boundary so a secret is not cut mid-token. */
+  private static final int REDACTION_OVERLAP = 512;
   /** Header-like secrets such as Authorization or Cookie. */
   private static final Pattern HEADER_SECRET = Pattern.compile(
     "(?i)(authorization|proxy-authorization|cookie|set-cookie|x-api-key)(\\s*[:=]\\s*)([^\\r\\n]+)"
   );
   /** Quoted JSON/property-style secret values, including values that contain spaces. */
   private static final Pattern QUOTED_NAMED_SECRET = Pattern.compile(
-    "(?i)(\\\"?(?:password|passwd|pwd|secret|token|access_token|refresh_token|api[_-]?key|authorization|cookie|session[_-]?id)\\\"?\\s*[:=]\\s*)([\\\"'])([^\\r\\n]*?)\\2"
+    "(?i)(\\\"?(?:password|passwd|pwd|secret|token|access_token|refresh_token|api[_-]?key|authorization|cookie|session[_-]?id)\\\"?\\s*[:=]\\s*)([\\\"'])([^\\r\\n]*?)(\\2|$)"
   );
   /** Unquoted JSON/property-style secret values. */
   private static final Pattern BARE_NAMED_SECRET = Pattern.compile(
@@ -85,7 +87,7 @@ public final class AllureUtils {
                                 final String contentType,
                                 final String extension,
                                 final String content) {
-    final String safe = limit(redact(String.valueOf(content)));
+    final String safe = safeAttachmentText(String.valueOf(content));
     attachBytes(name, contentType, extension, safe.getBytes(StandardCharsets.UTF_8));
   }
 
@@ -105,17 +107,31 @@ public final class AllureUtils {
       return text;
     }
     String result = HEADER_SECRET.matcher(text).replaceAll("$1$2" + MASK);
-    result = QUOTED_NAMED_SECRET.matcher(result).replaceAll("$1$2" + MASK + "$2");
+    result = QUOTED_NAMED_SECRET.matcher(result).replaceAll("$1$2" + MASK + "$4");
     result = BARE_NAMED_SECRET.matcher(result).replaceAll("$1" + MASK);
     return QUERY_SECRET.matcher(result).replaceAll("$1" + MASK);
   }
 
-  /** Applies the configured character limit to a text attachment. */
-  private static String limit(final String text) {
+  /**
+   * Bounds the amount of text sent through regular-expression redaction, then applies the visible limit.
+   *
+   * <p>When truncation is enabled, a small overlap past the visible boundary is retained during
+   * redaction. This lets a secret whose key starts near the boundary be masked before the visible
+   * prefix is cut. The complete source string is never scanned merely to produce a small report
+   * attachment.</p>
+   *
+   * @param text text that may contain report-sensitive data
+   * @return redacted attachment text, possibly truncated
+   */
+  private static String safeAttachmentText(final String text) {
     final int limit = Config.current().intProperty("report.attachment.maxChars", 20_000);
-    if (text == null || limit <= 0 || text.length() <= limit) {
-      return text;
+    if (limit <= 0 || text.length() <= limit) {
+      return redact(text);
     }
-    return text.substring(0, limit) + "\n...[truncated by framework]";
+    final long requestedScanLength = (long) limit + REDACTION_OVERLAP;
+    final int scanLength = (int) Math.min(text.length(), requestedScanLength);
+    final String redactedPrefix = redact(text.substring(0, scanLength));
+    final String visible = redactedPrefix.length() <= limit ? redactedPrefix : redactedPrefix.substring(0, limit);
+    return visible + "\n...[truncated by framework]";
   }
 }

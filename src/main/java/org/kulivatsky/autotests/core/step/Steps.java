@@ -8,6 +8,8 @@ import io.qameta.allure.model.StatusDetails;
 import io.qameta.allure.model.StepResult;
 import org.kulivatsky.autotests.core.util.AllureUtils;
 import org.kulivatsky.autotests.core.util.ExceptionUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.Map;
 import java.util.UUID;
@@ -24,6 +26,9 @@ import java.util.UUID;
  * trace is copied into Allure status details before the throwable leaves this class.</p>
  */
 public final class Steps {
+  /** Logger used when reporting fails but the test action must remain authoritative. */
+  private static final Logger LOGGER = LoggerFactory.getLogger(Steps.class);
+
   /** No instances. */
   private Steps() {
   }
@@ -104,47 +109,110 @@ public final class Steps {
   }
 
   /**
-   * Runs one action inside a complete Allure step lifecycle.
+   * Runs one action inside a best-effort Allure step lifecycle.
    *
-   * <p>A fresh UUID is created for every invocation so nested and parallel steps cannot overwrite
-   * one another. Parameters are converted to strings only when the Allure model is built; the
-   * original map remains untouched.</p>
-   *
-   * <p>{@code stopStep} is always called from {@code finally}. This matters when the action throws:
-   * leaving a started step open corrupts the nesting of every later step on the same Allure
-   * lifecycle.</p>
+   * <p>Reporting is deliberately subordinate to test execution. A failure while creating,
+   * updating, redacting, or stopping an Allure step is logged but never replaces the action result
+   * or the action's original exception. Fatal {@link VirtualMachineError}s are rethrown
+   * immediately without allocating stack-trace/reporting structures.</p>
    *
    * @param name report step name
    * @param params parameters written to the Allure step
-   * @param action action executed between {@code startStep} and {@code stopStep}
+   * @param action action executed by the step
    * @param <R> action result type
    * @return action result
    */
   private static <R> R execute(final String name,
                                final Map<String, Object> params,
                                final ThSupplier<R, ?> action) {
-    final AllureLifecycle lifecycle = Allure.getLifecycle();
+    final AllureLifecycle lifecycle = lifecycle();
     final String uuid = UUID.randomUUID().toString();
-    final StepResult stepResult = new StepResult().setName(name).setParameters(
-      params.entrySet().stream()
-        .map(entry -> new Parameter().setName(entry.getKey()).setValue(Params.reportValue(entry.getKey(), entry.getValue())))
-        .toList()
-    );
+    final boolean started = lifecycle != null && startStep(lifecycle, uuid, name, params);
+    boolean fatalFailure = false;
 
-    lifecycle.startStep(uuid, stepResult);
     try {
       final R result = action.get();
-      lifecycle.updateStep(uuid, step -> step.setStatus(Status.PASSED));
+      if (started) {
+        updateStatus(lifecycle, uuid, Status.PASSED, null);
+      }
       return result;
     } catch (final Throwable ex) {
-      final Status status = ex instanceof AssertionError ? Status.FAILED : Status.BROKEN;
-      final StatusDetails details = new StatusDetails()
-        .setMessage(AllureUtils.redact(ex.getMessage()))
-        .setTrace(AllureUtils.redact(ExceptionUtils.stackTrace(ex)));
-      lifecycle.updateStep(uuid, step -> step.setStatus(status).setStatusDetails(details));
+      fatalFailure = ex instanceof VirtualMachineError;
+      if (!fatalFailure && started) {
+        final Status status = ex instanceof AssertionError ? Status.FAILED : Status.BROKEN;
+        updateStatus(lifecycle, uuid, status, ex);
+      }
       return ExceptionUtils.sneakyThrow(ex);
     } finally {
-      lifecycle.stopStep(uuid);
+      if (started && !fatalFailure) {
+        stopStep(lifecycle, uuid);
+      }
     }
   }
+
+  /** Returns the active Allure lifecycle, or null when reporting itself cannot be initialized. */
+  private static AllureLifecycle lifecycle() {
+    try {
+      return Allure.getLifecycle();
+    } catch (final RuntimeException ex) {
+      LOGGER.warn("Unable to obtain Allure lifecycle; executing step without reporting", ex);
+      return null;
+    }
+  }
+
+  /** Starts an Allure step and returns whether a matching stop call is required. */
+  private static boolean startStep(final AllureLifecycle lifecycle,
+                                   final String uuid,
+                                   final String name,
+                                   final Map<String, Object> params) {
+    try {
+      final StepResult stepResult = new StepResult().setName(name).setParameters(
+        params.entrySet().stream()
+          .map(entry -> new Parameter()
+            .setName(entry.getKey())
+            .setValue(Params.reportValue(entry.getKey(), entry.getValue())))
+          .toList()
+      );
+      lifecycle.startStep(uuid, stepResult);
+      return true;
+    } catch (final RuntimeException ex) {
+      LOGGER.warn("Unable to start Allure step '{}'", name, ex);
+      return false;
+    }
+  }
+
+  /** Marks an Allure step without allowing reporting failures to escape into test code. */
+  private static void updateStatus(final AllureLifecycle lifecycle,
+                                   final String uuid,
+                                   final Status status,
+                                   final Throwable failure) {
+    try {
+      final StatusDetails details;
+      if (failure == null) {
+        details = null;
+      } else {
+        details = new StatusDetails()
+          .setMessage(AllureUtils.redact(failure.getMessage()))
+          .setTrace(AllureUtils.redact(ExceptionUtils.stackTrace(failure)));
+      }
+      lifecycle.updateStep(uuid, step -> {
+        step.setStatus(status);
+        if (details != null) {
+          step.setStatusDetails(details);
+        }
+      });
+    } catch (final RuntimeException ex) {
+      LOGGER.warn("Unable to update Allure step {}", uuid, ex);
+    }
+  }
+
+  /** Stops a previously started Allure step without allowing reporting failures to escape. */
+  private static void stopStep(final AllureLifecycle lifecycle, final String uuid) {
+    try {
+      lifecycle.stopStep(uuid);
+    } catch (final RuntimeException ex) {
+      LOGGER.warn("Unable to stop Allure step {}", uuid, ex);
+    }
+  }
+
 }

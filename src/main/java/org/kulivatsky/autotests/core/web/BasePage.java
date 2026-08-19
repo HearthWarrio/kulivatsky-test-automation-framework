@@ -8,6 +8,7 @@ import org.kulivatsky.autotests.core.annotation.Page;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Objects;
 
 import static com.codeborne.selenide.Condition.enabled;
 import static com.codeborne.selenide.Condition.visible;
@@ -106,11 +107,17 @@ public abstract class BasePage {
   /**
    * Builds a locator for the deepest element whose normalized descendant text contains a fragment.
    *
-   * @param text text fragment
+   * @param text non-blank text fragment
    * @return lazy Selenide element
+   * @throws NullPointerException when {@code text} is null
+   * @throws IllegalArgumentException when {@code text} is blank
    */
   private static SelenideElement textElement(final String text) {
-    final String literal = xpathLiteral(text);
+    final String checkedText = Objects.requireNonNull(text, "text");
+    if (checkedText.isBlank()) {
+      throw new IllegalArgumentException("text must not be blank");
+    }
+    final String literal = xpathLiteral(checkedText);
     final String xpath = "//*[contains(normalize-space(.), %1$s) and not(.//*[contains(normalize-space(.), %1$s)])]"
       .formatted(literal);
     return $x(xpath);

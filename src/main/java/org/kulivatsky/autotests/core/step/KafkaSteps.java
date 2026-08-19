@@ -5,6 +5,7 @@ import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
 
 import java.time.Duration;
+import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
 import static org.kulivatsky.autotests.core.step.Params.params;
@@ -56,13 +57,17 @@ public final class KafkaSteps {
                                                           final K key,
                                                           final V value,
                                                           final Duration timeout) {
+    final Duration checkedTimeout = Objects.requireNonNull(timeout, "timeout");
+    if (checkedTimeout.isZero() || checkedTimeout.isNegative()) {
+      throw new IllegalArgumentException("timeout must be positive");
+    }
     return new SupplierStep.Of<>(
       "Publish Kafka record",
       params("topic", topic, "key", secret(key)),
       () -> {
         try {
           return producer.send(new ProducerRecord<>(topic, key, value))
-            .get(timeout.toMillis(), TimeUnit.MILLISECONDS);
+            .get(checkedTimeout.toNanos(), TimeUnit.NANOSECONDS);
         } catch (final InterruptedException exception) {
           Thread.currentThread().interrupt();
           throw exception;

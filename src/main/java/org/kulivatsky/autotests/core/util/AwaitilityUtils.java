@@ -50,7 +50,11 @@ public final class AwaitilityUtils {
           assertThat(current).isTrue();
         });
     } catch (final RuntimeException | AssertionError ex) {
-      AllureUtils.attachText("Last observed value", lastValue.get());
+      try {
+        AllureUtils.attachText("Last observed value", lastValue.get());
+      } catch (final RuntimeException reportingFailure) {
+        ex.addSuppressed(reportingFailure);
+      }
       throw ex;
     }
   }

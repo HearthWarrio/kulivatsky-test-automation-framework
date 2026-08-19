@@ -20,6 +20,8 @@ import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
 
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
@@ -60,6 +62,8 @@ public final class ComplexBackendTest {
   private Producer<String, String> producer;
   /** Test-owned scheduler used to simulate eventual consistency. */
   private ScheduledExecutorService scheduler;
+  /** JVM properties present before this test temporarily overrides infrastructure addresses. */
+  private final Map<String, String> previousProperties = new HashMap<>();
 
   /** Starts real infrastructure and wires its dynamic addresses into framework configuration. */
   @BeforeMethod
@@ -70,7 +74,7 @@ public final class ComplexBackendTest {
       .withPassword("demo");
     this.postgres.start();
 
-    this.kafkaContainer = new KafkaContainer("apache/kafka-native:3.8.0");
+    this.kafkaContainer = new KafkaContainer("apache/kafka-native:3.9.2");
     this.kafkaContainer.start();
 
     setDatabaseProperty("driver", "org.postgresql.Driver");
@@ -90,22 +94,43 @@ public final class ComplexBackendTest {
     this.scheduler = Executors.newSingleThreadScheduledExecutor();
   }
 
-  /** Releases framework pools, Kafka clients, executors, containers, and temporary properties. */
+  /**
+   * Releases framework pools, Kafka clients, executors, containers, and temporary properties.
+   *
+   * <p>Every cleanup action is attempted even if an earlier one fails. The first cleanup failure is
+   * rethrown after the remaining resources have been released; later failures are retained as
+   * suppressed exceptions.</p>
+   */
   @AfterMethod(alwaysRun = true)
   public void tearDown() {
-    if (this.scheduler != null) {
-      this.scheduler.shutdownNow();
-    }
-    if (this.producer != null) {
-      this.producer.close();
-    }
-    DBConnectionPoolStorage.closeAll();
-    clearInfrastructureProperties();
-    if (this.kafkaContainer != null) {
-      this.kafkaContainer.stop();
-    }
-    if (this.postgres != null) {
-      this.postgres.stop();
+    final List<RuntimeException> failures = new ArrayList<>();
+    cleanup(failures, () -> {
+      if (this.scheduler != null) {
+        this.scheduler.shutdownNow();
+      }
+    });
+    cleanup(failures, () -> {
+      if (this.producer != null) {
+        this.producer.close();
+      }
+    });
+    cleanup(failures, DBConnectionPoolStorage::closeAll);
+    cleanup(failures, this::restoreInfrastructureProperties);
+    cleanup(failures, () -> {
+      if (this.kafkaContainer != null) {
+        this.kafkaContainer.stop();
+      }
+    });
+    cleanup(failures, () -> {
+      if (this.postgres != null) {
+        this.postgres.stop();
+      }
+    });
+
+    if (!failures.isEmpty()) {
+      final RuntimeException first = failures.getFirst();
+      failures.stream().skip(1).forEach(first::addSuppressed);
+      throw first;
     }
   }
 
@@ -158,7 +183,7 @@ public final class ComplexBackendTest {
     final Kafka kafka = KafkaStorage.kafkaForWithUniqueGroupId(KAFKA_SERVICE, Env.Option.LOCAL);
     final List<ConsumerRecord<String, String>> records = step(
       "Consume published Kafka record",
-      () -> kafka.poll(TOPIC, Duration.ofSeconds(10))
+      () -> kafka.poll(TOPIC, record -> "501".equals(record.key()), Duration.ofSeconds(10))
     );
     step("Published event contains the order state", () -> {
       assertThat(records).hasSize(1);
@@ -184,22 +209,41 @@ public final class ComplexBackendTest {
   }
 
   /** Sets one database property for the demo service and local environment. */
-  private static void setDatabaseProperty(final String suffix, final String value) {
-    System.setProperty("db.demo_database.local." + suffix, value);
+  private void setDatabaseProperty(final String suffix, final String value) {
+    setInfrastructureProperty("db.demo_database.local." + suffix, value);
   }
 
   /** Sets one Kafka property for the demo service and local environment. */
-  private static void setKafkaProperty(final String suffix, final String value) {
-    System.setProperty("kafka.demo_kafka.local." + suffix, value);
+  private void setKafkaProperty(final String suffix, final String value) {
+    setInfrastructureProperty("kafka.demo_kafka.local." + suffix, value);
   }
 
-  /** Removes every JVM property introduced by {@link #setUp()}. */
-  private static void clearInfrastructureProperties() {
-    for (final String suffix : List.of("driver", "url", "username", "password", "maxTotal")) {
-      System.clearProperty("db.demo_database.local." + suffix);
+  /** Saves a property's previous value once, then applies the temporary test value. */
+  private void setInfrastructureProperty(final String key, final String value) {
+    if (!this.previousProperties.containsKey(key)) {
+      this.previousProperties.put(key, System.getProperty(key));
     }
-    for (final String suffix : List.of("bootstrapServers", "securityProtocol", "groupId", "autoOffsetReset")) {
-      System.clearProperty("kafka.demo_kafka.local." + suffix);
+    System.setProperty(key, value);
+  }
+
+  /** Restores every JVM property changed by {@link #setUp()} to its previous value. */
+  private void restoreInfrastructureProperties() {
+    this.previousProperties.forEach((key, previousValue) -> {
+      if (previousValue == null) {
+        System.clearProperty(key);
+      } else {
+        System.setProperty(key, previousValue);
+      }
+    });
+    this.previousProperties.clear();
+  }
+
+  /** Runs one cleanup action and records a runtime failure without interrupting later cleanup. */
+  private static void cleanup(final List<RuntimeException> failures, final Runnable action) {
+    try {
+      action.run();
+    } catch (final RuntimeException ex) {
+      failures.add(ex);
     }
   }
 }

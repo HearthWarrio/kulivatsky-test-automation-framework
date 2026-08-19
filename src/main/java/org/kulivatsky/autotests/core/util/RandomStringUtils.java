@@ -7,9 +7,9 @@ import java.util.concurrent.ThreadLocalRandom;
 /** Random and unique string generators used for synthetic test data. */
 public final class RandomStringUtils {
   /** Cyrillic lowercase alphabet used by the random generators. */
-  private static final char[] LOWER_CASE_CHARS = "абвгдежзиклмнопрстуфхцчшщэюя".toCharArray();
+  private static final char[] LOWER_CASE_CHARS = "абвгдеёжзийклмнопрстуфхцчшщъыьэюя".toCharArray();
   /** Cyrillic uppercase alphabet used by the random generators. */
-  private static final char[] UPPER_CASE_CHARS = "АБВГДЕЖЗИКЛМНОПРСТУФХЦЧШЩЭЮЯ".toCharArray();
+  private static final char[] UPPER_CASE_CHARS = "АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ".toCharArray();
 
   /** No instances. */
   private RandomStringUtils() {
@@ -41,10 +41,14 @@ public final class RandomStringUtils {
    * Generates a Cyrillic string whose first character is uppercase and the rest lowercase.
    *
    * @param length requested character count
-   * @return generated text; empty when {@code length < 1}
+   * @return generated text; empty when {@code length == 0}
+   * @throws IllegalArgumentException when {@code length} is negative
    */
   public static String randomCyrillicStringWithFirstCapital(final int length) {
-    if (length < 1) {
+    if (length < 0) {
+      throw new IllegalArgumentException("length must not be negative");
+    }
+    if (length == 0) {
       return "";
     }
     return generateRandomCyrillicUpperCaseString(1)

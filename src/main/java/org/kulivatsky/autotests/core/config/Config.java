@@ -128,14 +128,44 @@ public final class Config {
     return value == null || value.isBlank() ? defaultValue : value.trim();
   }
 
-  /** @return parsed integer property */
+  /**
+   * Reads an integer property and reports the offending key/value when parsing fails.
+   *
+   * @param key property key
+   * @param defaultValue value used when the property is absent or blank
+   * @return configured integer or {@code defaultValue}
+   * @throws IllegalArgumentException when the configured value is not a base-10 integer
+   */
   public int intProperty(final String key, final int defaultValue) {
-    return Integer.parseInt(property(key, Integer.toString(defaultValue)));
+    final String value = property(key, Integer.toString(defaultValue));
+    try {
+      return Integer.parseInt(value);
+    } catch (final NumberFormatException ex) {
+      throw new IllegalArgumentException("Invalid integer value '" + value + "' for " + key, ex);
+    }
   }
 
-  /** @return boolean parsed with {@link Boolean#parseBoolean(String)} */
+  /**
+   * Reads a strict boolean property.
+   *
+   * <p>Only {@code true} and {@code false}, ignoring case, are accepted. Values such as
+   * {@code tru}, {@code yes}, or {@code 1} fail fast instead of silently becoming false. This is
+   * especially important for safety-related switches such as report masking.</p>
+   *
+   * @param key property key
+   * @param defaultValue value used when the property is absent or blank
+   * @return configured boolean or {@code defaultValue}
+   * @throws IllegalArgumentException when a non-boolean value is configured
+   */
   public boolean booleanProperty(final String key, final boolean defaultValue) {
-    return Boolean.parseBoolean(property(key, Boolean.toString(defaultValue)));
+    final String value = property(key, Boolean.toString(defaultValue));
+    if ("true".equalsIgnoreCase(value)) {
+      return true;
+    }
+    if ("false".equalsIgnoreCase(value)) {
+      return false;
+    }
+    throw new IllegalArgumentException("Invalid boolean value '" + value + "' for " + key + "; expected true or false");
   }
 
   /**
@@ -173,7 +203,13 @@ public final class Config {
   /** Resolves a comma-separated case-insensitive enum list. */
   private <E extends Enum<E>> List<E> enumValues(final String key, final Class<E> enumType) {
     return stringValues(key).stream()
-      .map(value -> Enum.valueOf(enumType, value.toUpperCase(Locale.ROOT)))
+      .map(value -> {
+        try {
+          return Enum.valueOf(enumType, value.toUpperCase(Locale.ROOT));
+        } catch (final IllegalArgumentException ex) {
+          throw new IllegalArgumentException("Unsupported value '" + value + "' for " + key, ex);
+        }
+      })
       .toList();
   }
 

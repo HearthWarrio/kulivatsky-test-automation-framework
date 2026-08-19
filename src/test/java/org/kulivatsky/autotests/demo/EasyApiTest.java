@@ -29,7 +29,9 @@ public final class EasyApiTest {
   /** Stops the local server even when the test method fails. */
   @AfterMethod(alwaysRun = true)
   public void tearDown() {
-    this.server.close();
+    if (this.server != null) {
+      this.server.close();
+    }
   }
 
   /** Demonstrates a read-only API smoke check with status, payload, and schema assertions. */

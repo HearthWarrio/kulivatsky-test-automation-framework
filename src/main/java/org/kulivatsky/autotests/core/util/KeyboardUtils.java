@@ -87,11 +87,10 @@ public final class KeyboardUtils {
    * @param element input element to clear
    */
   public static void clearTextFieldViaBackspaceButton(final SelenideElement element) {
-    element.shouldBe(enabled).click();
+    element.shouldBe(enabled);
     final String value = element.getValue();
-    if (value != null) {
-      clearTextFieldViaBackspaceButton(element, value.length());
-    }
+    final int characterCount = value == null ? 0 : value.codePointCount(0, value.length());
+    clearTextFieldViaBackspaceButton(element, characterCount);
   }
 
   /**
@@ -111,23 +110,29 @@ public final class KeyboardUtils {
    * <p>If the sleep is interrupted, this method restores the thread interrupt flag and fails rather
    * than silently continuing with partial input.</p>
    *
+   * <p>Supplementary Unicode characters are sent as complete code points rather than split UTF-16
+   * surrogate halves.</p>
+   *
    * @param characters characters to send in sequence
    * @param milliseconds delay before each character
    * @throws IllegalArgumentException when the delay is negative
    * @throws IllegalStateException when the thread is interrupted during a delay
    */
   public static void sendKeysWithDelay(final CharSequence characters, final long milliseconds) {
+    final String text = Objects.requireNonNull(characters, "characters").toString();
     if (milliseconds < 0) {
       throw new IllegalArgumentException("milliseconds must not be negative");
     }
-    for (int i = 0; i < characters.length(); i++) {
+    for (int offset = 0; offset < text.length();) {
+      final int codePoint = text.codePointAt(offset);
       try {
         Thread.sleep(Duration.ofMillis(milliseconds));
       } catch (final InterruptedException ex) {
         Thread.currentThread().interrupt();
         throw new IllegalStateException("Keyboard input was interrupted", ex);
       }
-      pressButton(String.valueOf(characters.charAt(i)));
+      pressButton(new String(Character.toChars(codePoint)));
+      offset += Character.charCount(codePoint);
     }
   }
 }
