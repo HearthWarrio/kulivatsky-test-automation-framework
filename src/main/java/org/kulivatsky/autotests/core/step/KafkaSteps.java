@@ -8,6 +8,7 @@ import java.time.Duration;
 import java.util.concurrent.TimeUnit;
 
 import static org.kulivatsky.autotests.core.step.Params.params;
+import static org.kulivatsky.autotests.core.step.Params.secret;
 
 /** Step descriptors for publishing records through an existing Kafka producer. */
 public final class KafkaSteps {
@@ -38,7 +39,8 @@ public final class KafkaSteps {
    *
    * <p>{@link Producer#send(ProducerRecord)} is asynchronous, but the step waits on the returned
    * future so a successful Allure step means the broker acknowledged the record. Producer
-   * ownership remains with the caller.</p>
+   * ownership remains with the caller. The record key is masked in report parameters because Kafka
+   * keys frequently contain business identifiers.</p>
    *
    * @param producer producer used to send the record; not closed by the step
    * @param topic destination topic
@@ -56,9 +58,16 @@ public final class KafkaSteps {
                                                           final Duration timeout) {
     return new SupplierStep.Of<>(
       "Publish Kafka record",
-      params("topic", topic, "key", key),
-      () -> producer.send(new ProducerRecord<>(topic, key, value))
-        .get(timeout.toMillis(), TimeUnit.MILLISECONDS)
+      params("topic", topic, "key", secret(key)),
+      () -> {
+        try {
+          return producer.send(new ProducerRecord<>(topic, key, value))
+            .get(timeout.toMillis(), TimeUnit.MILLISECONDS);
+        } catch (final InterruptedException exception) {
+          Thread.currentThread().interrupt();
+          throw exception;
+        }
+      }
     );
   }
 }

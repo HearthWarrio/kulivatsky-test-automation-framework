@@ -16,25 +16,20 @@ import static com.codeborne.selenide.Selenide.$x;
 /**
  * Base class for Selenide page objects with optional page-open verification.
  *
- * <p>When a subclass has {@link Page}, construction may wait for two independent page markers:
- * visible text from {@link Page#title()} and a visible element from {@link Page#xPath()}. Blank
- * markers are skipped. A subclass without {@code @Page} is allowed and receives no constructor-time
- * verification.</p>
- *
- * <p>Page-object constructors therefore perform browser checks. Instantiate a page only after the
- * browser has navigated to the expected screen.</p>
+ * <p>Text lookup uses an escaped XPath literal and selects the deepest visible element containing
+ * the requested text. This avoids two common failures of raw string interpolation: apostrophes in
+ * user-facing text breaking the XPath, and broad ancestor elements such as {@code body} matching
+ * merely because a descendant contains the same text.</p>
  */
 public abstract class BasePage {
-  /** XPath template matching any element whose normalized text contains the supplied fragment. */
-  private static final String CONTAINS_TEXT_TEMPLATE = "//*[contains(normalize-space(.), '%s')]";
   /** Maximum wait for constructor-time page markers. */
   private static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(10);
 
   /**
    * Verifies page markers declared by the concrete page class.
    *
-   * <p>Title verification runs before XPath verification. Selenide assertion failures are allowed to
-   * propagate so construction fails immediately when the page object does not match the browser.</p>
+   * <p>Title verification runs before explicit XPath verification. A subclass without
+   * {@link Page} receives no constructor-time browser checks.</p>
    */
   protected BasePage() {
     final Page page = this.getClass().getAnnotation(Page.class);
@@ -42,7 +37,7 @@ public abstract class BasePage {
       return;
     }
     if (!page.title().isBlank()) {
-      $x(CONTAINS_TEXT_TEMPLATE.formatted(page.title())).shouldBe(visible, DEFAULT_TIMEOUT);
+      textElement(page.title()).shouldBe(visible, DEFAULT_TIMEOUT);
     }
     if (!page.xPath().isBlank()) {
       $x(page.xPath()).shouldBe(visible, DEFAULT_TIMEOUT);
@@ -50,18 +45,14 @@ public abstract class BasePage {
   }
 
   /**
-   * Checks whether an element containing the supplied normalized text is currently visible.
-   *
-   * <p>{@code SelenideElement.is(...)} performs a condition
-   * check rather than {@code shouldBe}; the method therefore returns a boolean instead of failing an
-   * assertion when the text is absent.</p>
+   * Checks whether the deepest element containing the supplied text is currently visible.
    *
    * @param label text fragment to search for
    * @return {@code true} when a matching element is visible
    */
   @Step("Text '{label}' is visible")
   public boolean isLabelVisible(final String label) {
-    return $x(CONTAINS_TEXT_TEMPLATE.formatted(label)).is(visible);
+    return textElement(label).is(visible);
   }
 
   /**
@@ -73,24 +64,20 @@ public abstract class BasePage {
    */
   @Step("Text '{label}' is visible")
   public boolean isLabelVisible(final String label, final Duration duration) {
-    return $x(CONTAINS_TEXT_TEMPLATE.formatted(label)).is(visible, duration);
+    return textElement(label).is(visible, duration);
   }
 
   /**
-   * Waits for visible text and clicks the matching element.
+   * Waits for visible text and clicks the deepest matching element.
    *
    * @param text text fragment used to locate the element
    */
   @Step("Click text '{text}'")
   public void clickByText(final String text) {
-    $x(CONTAINS_TEXT_TEMPLATE.formatted(text)).shouldBe(visible).click();
+    textElement(text).shouldBe(visible).click();
   }
 
-  /**
-   * Reads the current URL from Selenide's default WebDriver.
-   *
-   * @return browser URL as reported by Selenium
-   */
+  /** @return current browser URL as reported by Selenium */
   @Step("Read current URL")
   public String getUrl() {
     return WebDriverRunner.getWebDriver().getCurrentUrl();
@@ -106,22 +93,53 @@ public abstract class BasePage {
     return elements.texts();
   }
 
-  /**
-   * Waits until an element is enabled, then clicks it.
-   *
-   * @param element element to click
-   */
+  /** Waits until an element is enabled, then clicks it. */
   public void safeClick(final SelenideElement element) {
     element.shouldBe(enabled).click();
   }
 
-  /**
-   * Waits until an input is enabled, then replaces its value through Selenide.
-   *
-   * @param element input element
-   * @param value new field value
-   */
+  /** Waits until an input is enabled, then replaces its value. */
   public void fillInput(final SelenideElement element, final String value) {
     element.shouldBe(enabled).setValue(value);
+  }
+
+  /**
+   * Builds a locator for the deepest element whose normalized descendant text contains a fragment.
+   *
+   * @param text text fragment
+   * @return lazy Selenide element
+   */
+  private static SelenideElement textElement(final String text) {
+    final String literal = xpathLiteral(text);
+    final String xpath = "//*[contains(normalize-space(.), %1$s) and not(.//*[contains(normalize-space(.), %1$s)])]"
+      .formatted(literal);
+    return $x(xpath);
+  }
+
+  /**
+   * Quotes arbitrary text as an XPath 1.0 string literal.
+   *
+   * <p>When the text contains both quote types, the result is a {@code concat(...)} expression.
+   * No input text is inserted into XPath syntax without quoting.</p>
+   *
+   * @param text raw text
+   * @return XPath expression evaluating to exactly that text
+   */
+  private static String xpathLiteral(final String text) {
+    if (!text.contains("'")) {
+      return "'" + text + "'";
+    }
+    if (!text.contains("\"")) {
+      return "\"" + text + "\"";
+    }
+    final String[] parts = text.split("'", -1);
+    final StringBuilder result = new StringBuilder("concat(");
+    for (int index = 0; index < parts.length; index++) {
+      if (index > 0) {
+        result.append(", \"'\", ");
+      }
+      result.append('\'').append(parts[index]).append('\'');
+    }
+    return result.append(')').toString();
   }
 }

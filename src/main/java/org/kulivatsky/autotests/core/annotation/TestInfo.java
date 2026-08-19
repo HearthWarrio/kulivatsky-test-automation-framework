@@ -1,9 +1,7 @@
 package org.kulivatsky.autotests.core.annotation;
 
-import org.kulivatsky.autotests.core.config.APIService;
 import org.kulivatsky.autotests.core.config.Env;
 import org.kulivatsky.autotests.core.config.Launch;
-import org.kulivatsky.autotests.core.config.Project;
 import org.kulivatsky.autotests.core.config.TestLevel;
 import org.kulivatsky.autotests.core.config.TestSubject;
 import org.kulivatsky.autotests.core.config.TestType;
@@ -68,16 +66,18 @@ public @interface TestInfo {
   TestLevel.Option[] testLevel() default {};
 
   /**
-   * Projects to which the test belongs.
+   * Projects to which the test belongs. Values are compared case-insensitively with
+   * {@code autotests.project}.
    *
    * @return allowed projects; empty means any configured project
    */
-  Project.Option[] project() default {};
+  String[] project() default {};
 
   /**
-   * Services exercised by the test.
+   * Logical services exercised by the test. Values are compared case-insensitively with
+   * {@code autotests.service}.
    *
-   * @return allowed API services; empty means any configured service
+   * @return allowed service ids; empty means any configured service
    */
-  APIService.Option[] apiService() default {};
+  String[] service() default {};
 }

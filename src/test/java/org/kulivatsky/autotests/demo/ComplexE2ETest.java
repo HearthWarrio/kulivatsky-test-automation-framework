@@ -13,8 +13,6 @@ import org.testng.annotations.Test;
 import java.io.File;
 import java.time.Duration;
 
-import static org.kulivatsky.autotests.core.config.APIService.Option.DEMO_API;
-import static org.kulivatsky.autotests.core.config.Project.Option.DEMO;
 import static org.kulivatsky.autotests.core.config.TestLevel.Option.SYSTEM;
 import static org.kulivatsky.autotests.core.config.TestSubject.Option.E2E;
 import static org.kulivatsky.autotests.core.config.TestType.Option.REGRESSION;
@@ -57,8 +55,8 @@ public final class ComplexE2ETest {
     testType = REGRESSION,
     testSubject = E2E,
     testLevel = SYSTEM,
-    project = DEMO,
-    apiService = DEMO_API
+    project = "demo",
+    service = "demo_api"
   )
   public void createOrderAwaitCompletionAndUploadAttachment() {
     final Response created = stepContext()

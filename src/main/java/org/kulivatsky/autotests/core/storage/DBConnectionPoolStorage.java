@@ -1,7 +1,7 @@
 package org.kulivatsky.autotests.core.storage;
 
 import org.apache.commons.dbcp2.BasicDataSource;
-import org.kulivatsky.autotests.core.config.APIService;
+import org.kulivatsky.autotests.core.config.Service;
 import org.kulivatsky.autotests.core.config.Config;
 import org.kulivatsky.autotests.core.config.Env;
 import org.kulivatsky.autotests.core.util.Database;
@@ -15,7 +15,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * Process-wide cache of database connection pools keyed by service and environment.
  *
  * <p>Each unique {@code db.<service>.<env>} prefix owns one {@link BasicDataSource}. Calls for the
- * same pair reuse that pool. The returned {@link Database} from {@link #databaseFor(APIService, Env)}
+ * same pair reuse that pool. The returned {@link Database} from {@link #databaseFor(Service, Env)}
  * is a non-owning facade: closing it must not close a pool shared with other tests.</p>
  *
  * <p>Pools are closed both from the TestNG execution listener and from a JVM shutdown hook. Repeated
@@ -36,12 +36,12 @@ public final class DBConnectionPoolStorage {
   /**
    * Returns a non-owning {@link Database} facade over the shared pool for a service/environment.
    *
-   * @param apiService logical database service
+   * @param service logical database service
    * @param env target environment
    * @return database facade backed by the cached pool
    */
-  public static Database databaseFor(final APIService apiService, final Env env) {
-    final String prefix = "db.%s.%s".formatted(normalize(apiService), normalize(env));
+  public static Database databaseFor(final Service service, final Env env) {
+    final String prefix = "db.%s.%s".formatted(service.id(), normalize(env));
     final BasicDataSource dataSource = STORAGE.computeIfAbsent(prefix, DBConnectionPoolStorage::createDataSource);
     return Database.shared(dataSource);
   }
@@ -50,15 +50,15 @@ public final class DBConnectionPoolStorage {
    * Returns the shared Apache DBCP pool itself.
    *
    * <p>The storage owns this object. Callers that close it directly invalidate the cached pool for
-   * every other user of the same service/environment pair. Prefer {@link #databaseFor(APIService, Env)}
+   * every other user of the same service/environment pair. Prefer {@link #databaseFor(Service, Env)}
    * unless direct pool configuration or inspection is required.</p>
    *
-   * @param apiService logical database service
+   * @param service logical database service
    * @param env target environment
    * @return cached connection pool
    */
-  public static BasicDataSource dbConnectionPoolFor(final APIService apiService, final Env env) {
-    final String prefix = "db.%s.%s".formatted(normalize(apiService), normalize(env));
+  public static BasicDataSource dbConnectionPoolFor(final Service service, final Env env) {
+    final String prefix = "db.%s.%s".formatted(service.id(), normalize(env));
     return STORAGE.computeIfAbsent(prefix, DBConnectionPoolStorage::createDataSource);
   }
 
@@ -82,7 +82,7 @@ public final class DBConnectionPoolStorage {
   /**
    * Creates a new DBCP pool from properties under one database prefix.
    *
-   * @param prefix configuration prefix such as {@code db.demo_database.local}
+   * @param prefix configuration prefix such as {@code db.orders_database.test}
    * @return configured but lazily connected data source
    */
   private static BasicDataSource createDataSource(final String prefix) {

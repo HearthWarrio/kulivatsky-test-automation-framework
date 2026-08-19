@@ -3,9 +3,7 @@ package org.kulivatsky.autotests.core.storage;
 import io.restassured.config.HttpClientConfig;
 import io.restassured.config.RestAssuredConfig;
 import io.restassured.config.SSLConfig;
-import org.kulivatsky.autotests.core.config.APIService;
 import org.kulivatsky.autotests.core.config.Config;
-import org.kulivatsky.autotests.core.config.Env;
 
 /** Builds REST Assured configuration from framework properties. */
 public final class RestAssuredConfigStorage {
@@ -34,19 +32,5 @@ public final class RestAssuredConfigStorage {
       result = result.sslConfig(new SSLConfig().relaxedHTTPSValidation());
     }
     return result;
-  }
-
-  /**
-   * Returns REST Assured configuration for a service/environment pair.
-   *
-   * <p>The current implementation uses global REST settings and ignores both selectors. It is
-   * therefore equivalent to calling {@link #config()} directly.</p>
-   *
-   * @param apiService service selector; currently not used
-   * @param env environment selector; currently not used
-   * @return newly built REST Assured configuration
-   */
-  public static RestAssuredConfig configFor(final APIService apiService, final Env env) {
-    return config();
   }
 }

@@ -6,9 +6,18 @@
 
   <groupId>org.kulivatsky</groupId>
   <artifactId>kulivatsky-test-automation-framework</artifactId>
-  <version>1.0.0-SNAPSHOT</version>
+  <version>0.1.0-SNAPSHOT</version>
   <name>Kulivatsky Test Automation Framework</name>
   <description>Reusable Java test automation framework.</description>
+  <inceptionYear>2026</inceptionYear>
+
+  <licenses>
+    <license>
+      <name>Apache License, Version 2.0</name>
+      <url>https://www.apache.org/licenses/LICENSE-2.0.txt</url>
+      <distribution>repo</distribution>
+    </license>
+  </licenses>
 
   <developers>
     <developer>
@@ -18,12 +27,16 @@
 
   <properties>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
     <maven.compiler.release>21</maven.compiler.release>
+
     <restAssured.version>5.5.0</restAssured.version>
     <allure.version>2.29.0</allure.version>
     <aspectj.version>1.9.22.1</aspectj.version>
     <jackson.version>2.18.0</jackson.version>
-    <test.excludedGroups>ui</test.excludedGroups>
+    <testcontainers.version>2.0.5</testcontainers.version>
+
+    <test.excludedGroups>ui,container</test.excludedGroups>
   </properties>
 
   <dependencies>
@@ -36,11 +49,6 @@
     <dependency>
       <groupId>io.qameta.allure</groupId>
       <artifactId>allure-testng</artifactId>
-      <version>${allure.version}</version>
-    </dependency>
-    <dependency>
-      <groupId>io.qameta.allure</groupId>
-      <artifactId>allure-rest-assured</artifactId>
       <version>${allure.version}</version>
     </dependency>
     <dependency>
@@ -79,6 +87,7 @@
       <groupId>org.postgresql</groupId>
       <artifactId>postgresql</artifactId>
       <version>42.7.4</version>
+      <scope>test</scope>
     </dependency>
     <dependency>
       <groupId>org.apache.commons</groupId>
@@ -130,11 +139,16 @@
       <version>${aspectj.version}</version>
       <scope>test</scope>
     </dependency>
-
     <dependency>
-      <groupId>com.h2database</groupId>
-      <artifactId>h2</artifactId>
-      <version>2.3.232</version>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>testcontainers-kafka</artifactId>
+      <version>${testcontainers.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>testcontainers-postgresql</artifactId>
+      <version>${testcontainers.version}</version>
       <scope>test</scope>
     </dependency>
   </dependencies>
@@ -146,16 +160,91 @@
         <artifactId>maven-compiler-plugin</artifactId>
         <version>3.15.0</version>
       </plugin>
+
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-surefire-plugin</artifactId>
-        <version>3.5.0</version>
+        <version>3.5.5</version>
         <configuration>
           <excludedGroups>${test.excludedGroups}</excludedGroups>
           <argLine>-javaagent:${settings.localRepository}/org/aspectj/aspectjweaver/${aspectj.version}/aspectjweaver-${aspectj.version}.jar</argLine>
+          <properties>
+            <property>
+              <name>listener</name>
+              <value>org.kulivatsky.autotests.core.listener.TestNGListener</value>
+            </property>
+          </properties>
           <systemPropertyVariables>
             <allure.results.directory>${project.build.directory}/allure-results</allure.results.directory>
           </systemPropertyVariables>
+        </configuration>
+      </plugin>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-enforcer-plugin</artifactId>
+        <version>3.6.2</version>
+        <executions>
+          <execution>
+            <id>enforce-toolchain</id>
+            <goals>
+              <goal>enforce</goal>
+            </goals>
+            <configuration>
+              <rules>
+                <requireJavaVersion>
+                  <version>[21,)</version>
+                </requireJavaVersion>
+                <requireMavenVersion>
+                  <version>[3.9.0,4.0.0)</version>
+                </requireMavenVersion>
+              </rules>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-source-plugin</artifactId>
+        <version>3.4.0</version>
+        <executions>
+          <execution>
+            <id>attach-sources</id>
+            <goals>
+              <goal>jar-no-fork</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-javadoc-plugin</artifactId>
+        <version>3.12.0</version>
+        <configuration>
+          <failOnError>true</failOnError>
+        </configuration>
+        <executions>
+          <execution>
+            <id>attach-javadocs</id>
+            <goals>
+              <goal>jar</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-jar-plugin</artifactId>
+        <version>3.5.0</version>
+        <configuration>
+          <archive>
+            <manifestEntries>
+              <Automatic-Module-Name>org.kulivatsky.autotests</Automatic-Module-Name>
+            </manifestEntries>
+          </archive>
         </configuration>
       </plugin>
     </plugins>
@@ -163,10 +252,73 @@
 
   <profiles>
     <profile>
+      <id>integration</id>
+      <properties>
+        <test.excludedGroups>ui</test.excludedGroups>
+      </properties>
+    </profile>
+
+    <profile>
       <id>ui</id>
+      <properties>
+        <test.excludedGroups>container</test.excludedGroups>
+      </properties>
+    </profile>
+
+    <profile>
+      <id>full</id>
       <properties>
         <test.excludedGroups>__none__</test.excludedGroups>
       </properties>
+    </profile>
+
+    <profile>
+      <id>api-compat</id>
+      <activation>
+        <property>
+          <name>compat.version</name>
+        </property>
+      </activation>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>com.github.siom79.japicmp</groupId>
+            <artifactId>japicmp-maven-plugin</artifactId>
+            <version>0.26.1</version>
+            <executions>
+              <execution>
+                <id>check-public-api-compatibility</id>
+                <phase>verify</phase>
+                <goals>
+                  <goal>cmp</goal>
+                </goals>
+                <configuration>
+                  <oldVersion>
+                    <dependency>
+                      <groupId>${project.groupId}</groupId>
+                      <artifactId>${project.artifactId}</artifactId>
+                      <version>${compat.version}</version>
+                      <type>jar</type>
+                    </dependency>
+                  </oldVersion>
+                  <newVersion>
+                    <file>
+                      <path>${project.build.directory}/${project.build.finalName}.jar</path>
+                    </file>
+                  </newVersion>
+                  <parameter>
+                    <accessModifier>public</accessModifier>
+                    <onlyModified>true</onlyModified>
+                    <breakBuildOnBinaryIncompatibleModifications>true</breakBuildOnBinaryIncompatibleModifications>
+                    <breakBuildOnSourceIncompatibleModifications>true</breakBuildOnSourceIncompatibleModifications>
+                    <ignoreMissingOptionalDependency>true</ignoreMissingOptionalDependency>
+                  </parameter>
+                </configuration>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
     </profile>
   </profiles>
 </project>

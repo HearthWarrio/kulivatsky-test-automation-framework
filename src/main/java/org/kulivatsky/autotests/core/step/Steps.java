@@ -6,6 +6,7 @@ import io.qameta.allure.model.Parameter;
 import io.qameta.allure.model.Status;
 import io.qameta.allure.model.StatusDetails;
 import io.qameta.allure.model.StepResult;
+import org.kulivatsky.autotests.core.util.AllureUtils;
 import org.kulivatsky.autotests.core.util.ExceptionUtils;
 
 import java.util.Map;
@@ -126,7 +127,7 @@ public final class Steps {
     final String uuid = UUID.randomUUID().toString();
     final StepResult stepResult = new StepResult().setName(name).setParameters(
       params.entrySet().stream()
-        .map(entry -> new Parameter().setName(entry.getKey()).setValue(String.valueOf(entry.getValue())))
+        .map(entry -> new Parameter().setName(entry.getKey()).setValue(Params.reportValue(entry.getKey(), entry.getValue())))
         .toList()
     );
 
@@ -138,8 +139,8 @@ public final class Steps {
     } catch (final Throwable ex) {
       final Status status = ex instanceof AssertionError ? Status.FAILED : Status.BROKEN;
       final StatusDetails details = new StatusDetails()
-        .setMessage(ex.getMessage())
-        .setTrace(ExceptionUtils.stackTrace(ex));
+        .setMessage(AllureUtils.redact(ex.getMessage()))
+        .setTrace(AllureUtils.redact(ExceptionUtils.stackTrace(ex)));
       lifecycle.updateStep(uuid, step -> step.setStatus(status).setStatusDetails(details));
       return ExceptionUtils.sneakyThrow(ex);
     } finally {

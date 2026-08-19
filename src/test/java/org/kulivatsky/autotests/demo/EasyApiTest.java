@@ -6,8 +6,6 @@ import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
 
-import static org.kulivatsky.autotests.core.config.APIService.Option.DEMO_API;
-import static org.kulivatsky.autotests.core.config.Project.Option.DEMO;
 import static org.kulivatsky.autotests.core.config.TestLevel.Option.COMPONENT;
 import static org.kulivatsky.autotests.core.config.TestSubject.Option.BACKEND;
 import static org.kulivatsky.autotests.core.config.TestType.Option.SMOKE;
@@ -17,10 +15,7 @@ import static org.kulivatsky.autotests.core.step.ResponseSteps.responseStatusCod
 import static org.kulivatsky.autotests.core.step.StepContexts.stepContext;
 import static org.kulivatsky.autotests.demo.api.DemoApiSteps.getOrder;
 
-/**
- * Small API example showing a minimal test shape: request step, fluent response checks,
- * and launch metadata.
- */
+/** Small API example showing request steps, fluent response checks, and launch metadata. */
 public final class EasyApiTest {
   /** Local HTTP server owned by the current test method. */
   private DemoServer server;
@@ -37,17 +32,15 @@ public final class EasyApiTest {
     this.server.close();
   }
 
-  /**
-   * Demonstrates a read-only API smoke check with status, payload, and schema assertions.
-   */
+  /** Demonstrates a read-only API smoke check with status, payload, and schema assertions. */
   @Test
   @TestInfo(
     name = "Get an existing order",
     testType = SMOKE,
     testSubject = BACKEND,
     testLevel = COMPONENT,
-    project = DEMO,
-    apiService = DEMO_API
+    project = "demo",
+    service = "demo_api"
   )
   public void getExistingOrder() {
     stepContext()

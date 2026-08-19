@@ -21,7 +21,7 @@ public final class WebUrlStorage {
    * @throws java.util.NoSuchElementException when the required property is absent or blank
    */
   public static String webUrlFor(final Project project, final Env env) {
-    final String key = "web.%s.%s.url".formatted(normalize(project), normalize(env));
+    final String key = "web.%s.%s.url".formatted(project.id(), normalize(env));
     return Config.current().property(key);
   }
 

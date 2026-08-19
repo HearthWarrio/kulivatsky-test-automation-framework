@@ -129,7 +129,9 @@ public final class SQLUtils {
    * Prepares a statement and binds positional parameters.
    *
    * <p>JDBC parameter indices start at one, while the Java array starts at zero. No type-specific
-   * coercion is done here; the driver receives each value through {@code setObject}.</p>
+   * coercion is done here; the driver receives each value through {@code setObject}. If binding any
+   * parameter fails, this method closes the already-created statement before rethrowing the original
+   * {@link SQLException}; a close failure is retained as a suppressed exception.</p>
    *
    * @param connection open JDBC connection
    * @param sql SQL text
@@ -141,9 +143,18 @@ public final class SQLUtils {
                                            final String sql,
                                            final Object... params) throws SQLException {
     final PreparedStatement statement = connection.prepareStatement(sql);
-    for (int index = 0; index < params.length; index++) {
-      statement.setObject(index + 1, params[index]);
+    try {
+      for (int index = 0; index < params.length; index++) {
+        statement.setObject(index + 1, params[index]);
+      }
+      return statement;
+    } catch (final SQLException exception) {
+      try {
+        statement.close();
+      } catch (final SQLException closeException) {
+        exception.addSuppressed(closeException);
+      }
+      throw exception;
     }
-    return statement;
   }
 }

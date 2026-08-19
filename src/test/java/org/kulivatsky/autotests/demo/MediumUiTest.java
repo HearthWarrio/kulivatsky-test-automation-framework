@@ -8,7 +8,6 @@ import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
 
-import static org.kulivatsky.autotests.core.config.Project.Option.DEMO;
 import static org.kulivatsky.autotests.core.config.TestLevel.Option.SYSTEM;
 import static org.kulivatsky.autotests.core.config.TestSubject.Option.UI;
 import static org.kulivatsky.autotests.core.config.TestType.Option.REGRESSION;
@@ -41,7 +40,8 @@ public final class MediumUiTest {
     testType = REGRESSION,
     testSubject = UI,
     testLevel = SYSTEM,
-    project = DEMO
+    project = "demo",
+    service = "demo_web"
   )
   public void addProductToCart() {
     step(open(this.server.url("/catalog")));

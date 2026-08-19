@@ -8,7 +8,7 @@ import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
-import org.kulivatsky.autotests.core.config.APIService;
+import org.kulivatsky.autotests.core.config.Service;
 import org.kulivatsky.autotests.core.config.Config;
 import org.kulivatsky.autotests.core.config.Env;
 import org.kulivatsky.autotests.core.util.Kafka;
@@ -26,12 +26,12 @@ public final class KafkaStorage {
   /**
    * Creates a short-lived {@link Kafka} facade from the configured service/environment properties.
    *
-   * @param apiService logical Kafka service
+   * @param service logical Kafka service
    * @param env target environment
    * @return facade that creates and closes producers/consumers per operation
    */
-  public static Kafka kafkaFor(final APIService apiService, final Env env) {
-    return Kafka.of(propertiesFor(apiService, env));
+  public static Kafka kafkaFor(final Service service, final Env env) {
+    return Kafka.of(propertiesFor(service, env));
   }
 
   /**
@@ -40,12 +40,12 @@ public final class KafkaStorage {
    * <p>The configured group id is used as a readable prefix and an eight-character UUID fragment is
    * appended. This avoids one test consuming offsets that another parallel test expected to see.</p>
    *
-   * @param apiService logical Kafka service
+   * @param service logical Kafka service
    * @param env target environment
    * @return facade configured with an isolated consumer group id
    */
-  public static Kafka kafkaForWithUniqueGroupId(final APIService apiService, final Env env) {
-    final Properties properties = propertiesFor(apiService, env);
+  public static Kafka kafkaForWithUniqueGroupId(final Service service, final Env env) {
+    final Properties properties = propertiesFor(service, env);
     final String baseGroup = properties.getProperty(ConsumerConfig.GROUP_ID_CONFIG, "autotests");
     properties.put(ConsumerConfig.GROUP_ID_CONFIG, baseGroup + "-" + UUID.randomUUID().toString().substring(0, 8));
     return Kafka.of(properties);
@@ -56,12 +56,12 @@ public final class KafkaStorage {
    *
    * <p>The caller owns the returned client and must close it.</p>
    *
-   * @param apiService logical Kafka service
+   * @param service logical Kafka service
    * @param env target environment
    * @return new producer instance
    */
-  public static Producer<String, String> producerFor(final APIService apiService, final Env env) {
-    return new KafkaProducer<>(propertiesFor(apiService, env));
+  public static Producer<String, String> producerFor(final Service service, final Env env) {
+    return new KafkaProducer<>(propertiesFor(service, env));
   }
 
   /**
@@ -69,12 +69,12 @@ public final class KafkaStorage {
    *
    * <p>The caller owns the returned client and must close it.</p>
    *
-   * @param apiService logical Kafka service
+   * @param service logical Kafka service
    * @param env target environment
    * @return new consumer instance
    */
-  public static Consumer<String, String> consumerFor(final APIService apiService, final Env env) {
-    return new KafkaConsumer<>(propertiesFor(apiService, env));
+  public static Consumer<String, String> consumerFor(final Service service, final Env env) {
+    return new KafkaConsumer<>(propertiesFor(service, env));
   }
 
   /**
@@ -83,13 +83,13 @@ public final class KafkaStorage {
    * <p>The same property set contains producer serializers and consumer deserializers so it can be
    * used to construct either client type. Only string keys and values are configured by default.</p>
    *
-   * @param apiService logical Kafka service
+   * @param service logical Kafka service
    * @param env target environment
    * @return fresh mutable properties object
    */
-  public static Properties propertiesFor(final APIService apiService, final Env env) {
+  public static Properties propertiesFor(final Service service, final Env env) {
     final Config config = Config.current();
-    final String prefix = "kafka.%s.%s".formatted(normalize(apiService), normalize(env));
+    final String prefix = "kafka.%s.%s".formatted(service.id(), normalize(env));
     final Properties properties = new Properties();
     properties.put(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG, config.property(prefix + ".bootstrapServers"));
     properties.put(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, config.property(prefix + ".securityProtocol", "PLAINTEXT"));

@@ -7,21 +7,29 @@ import java.util.List;
 import java.util.Locale;
 import java.util.NoSuchElementException;
 import java.util.Properties;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Read-only access to framework launch configuration.
  *
- * <p>The default values come from {@code autotests.properties} on the classpath. A JVM system
- * property with the same key always wins, which allows CI jobs to override settings without
- * modifying packaged resources.</p>
+ * <p>Every lookup uses the same precedence: JVM system property, environment variable, then the
+ * classpath {@code autotests.properties} file. Environment-variable names are derived from property
+ * keys by inserting an underscore before camel-case capitals, replacing punctuation with
+ * underscores, and converting the result to upper case. For example,
+ * {@code kafka.orders.local.bootstrapServers} maps to
+ * {@code KAFKA_ORDERS_LOCAL_BOOTSTRAP_SERVERS}.</p>
  *
- * <p>The class is initialized once. Changes to {@link System#getProperties()} made after a value
- * has already been read still affect later calls because each lookup checks system properties at
- * call time; the classpath file itself is loaded only once.</p>
+ * <p>The optional classpath file is loaded once, while system properties and environment variables
+ * are read for every call. The framework JAR does not require or package a project-specific
+ * {@code autotests.properties}; consumers may provide one of their own or configure the process
+ * entirely through runtime properties and environment variables.</p>
  */
 public final class Config {
   /** Classpath resource that contains framework defaults. */
   private static final String RESOURCE = "autotests.properties";
+  /** Finds camel-case boundaries when deriving an environment-variable name. */
+  private static final Pattern CAMEL_CASE_BOUNDARY = Pattern.compile("([a-z0-9])([A-Z])");
   /** Process-wide configuration facade backed by the loaded classpath properties. */
   private static final Config CURRENT = new Config(loadProperties());
 
@@ -31,17 +39,13 @@ public final class Config {
   /**
    * Creates a configuration facade around already loaded defaults.
    *
-   * @param properties classpath defaults; system properties are resolved later per lookup
+   * @param properties classpath defaults; external overrides are resolved later per lookup
    */
   private Config(final Properties properties) {
     this.properties = properties;
   }
 
-  /**
-   * Returns the process-wide configuration facade.
-   *
-   * @return singleton configuration instance
-   */
+  /** @return process-wide configuration facade */
   public static Config current() {
     return CURRENT;
   }
@@ -49,8 +53,7 @@ public final class Config {
   /**
    * Reads {@code autotests.env}.
    *
-   * @return configured environment, {@link Env.Option#LOCAL} when the property is absent or blank
-   * @throws IllegalArgumentException if the configured text is not a known environment value
+   * @return configured environment, {@link Env.Option#LOCAL} when absent or blank
    */
   public Env.Option env() {
     return enumValue("autotests.env", Env.Option.class, Env.Option.LOCAL);
@@ -59,75 +62,54 @@ public final class Config {
   /**
    * Reads {@code autotests.launch}.
    *
-   * @return configured launch mode, {@link Launch.Option#LOCAL} when the property is absent or blank
-   * @throws IllegalArgumentException if the configured text is not a known launch value
+   * @return configured launch mode, {@link Launch.Option#LOCAL} when absent or blank
    */
   public Launch.Option launch() {
     return enumValue("autotests.launch", Launch.Option.class, Launch.Option.LOCAL);
   }
 
-  /**
-   * Reads the comma-separated {@code autotests.testType} selection.
-   *
-   * @return selected test types; empty when no filter is configured
-   * @throws IllegalArgumentException if any token is not a known test type
-   */
+  /** @return test types selected by {@code autotests.testType}; empty means no filter */
   public List<TestType> testType() {
     return enumValues("autotests.testType", TestType.Option.class).stream().map(value -> (TestType) value).toList();
   }
 
-  /**
-   * Reads the comma-separated {@code autotests.testSubject} selection.
-   *
-   * @return selected test subjects; empty when no filter is configured
-   * @throws IllegalArgumentException if any token is not a known subject
-   */
+  /** @return test subjects selected by {@code autotests.testSubject}; empty means no filter */
   public List<TestSubject> testSubject() {
     return enumValues("autotests.testSubject", TestSubject.Option.class).stream().map(value -> (TestSubject) value).toList();
   }
 
-  /**
-   * Reads the comma-separated {@code autotests.testLevel} selection.
-   *
-   * @return selected test levels; empty when no filter is configured
-   * @throws IllegalArgumentException if any token is not a known level
-   */
+  /** @return test levels selected by {@code autotests.testLevel}; empty means no filter */
   public List<TestLevel> testLevel() {
     return enumValues("autotests.testLevel", TestLevel.Option.class).stream().map(value -> (TestLevel) value).toList();
   }
 
   /**
-   * Reads the comma-separated {@code autotests.project} selection.
+   * Reads comma-separated project ids from {@code autotests.project}.
    *
-   * @return selected projects; empty when no filter is configured
-   * @throws IllegalArgumentException if any token is not a known project
+   * @return normalized project identifiers; empty means no project filter
    */
   public List<Project> project() {
-    return enumValues("autotests.project", Project.Option.class).stream().map(value -> (Project) value).toList();
+    return stringValues("autotests.project").stream().map(Project::of).toList();
   }
 
   /**
-   * Reads the comma-separated {@code autotests.apiService} selection.
+   * Reads comma-separated service ids from {@code autotests.service}.
    *
-   * @return selected services; empty when no filter is configured
-   * @throws IllegalArgumentException if any token is not a known service
+   * @return normalized service identifiers; empty means no service filter
    */
-  public List<APIService> apiService() {
-    return enumValues("autotests.apiService", APIService.Option.class).stream().map(value -> (APIService) value).toList();
+  public List<Service> service() {
+    return stringValues("autotests.service").stream().map(Service::of).toList();
   }
 
   /**
-   * Reads a mandatory property.
-   *
-   * <p>A system property overrides the same key from {@code autotests.properties}. Leading and
-   * trailing whitespace is removed before the value is returned.</p>
+   * Reads a mandatory property using system-property, environment-variable, classpath precedence.
    *
    * @param key property key
-   * @return non-blank property value
-   * @throws NoSuchElementException if neither source contains a non-blank value
+   * @return trimmed non-blank value
+   * @throws NoSuchElementException when no source contains a non-blank value
    */
   public String property(final String key) {
-    final String value = System.getProperty(key, this.properties.getProperty(key));
+    final String value = resolvedValue(key);
     if (value == null || value.isBlank()) {
       throw new NoSuchElementException("Missing configuration property: " + key);
     }
@@ -135,53 +117,50 @@ public final class Config {
   }
 
   /**
-   * Reads an optional property.
-   *
-   * <p>A system property overrides the classpath value. Blank configured values are treated as
-   * absent and therefore produce {@code defaultValue}.</p>
+   * Reads an optional property using system-property, environment-variable, classpath precedence.
    *
    * @param key property key
-   * @param defaultValue value returned when the property is absent or blank
+   * @param defaultValue value returned when every source is absent or blank
    * @return trimmed configured value or {@code defaultValue}
    */
   public String property(final String key, final String defaultValue) {
-    final String value = System.getProperty(key, this.properties.getProperty(key));
+    final String value = resolvedValue(key);
     return value == null || value.isBlank() ? defaultValue : value.trim();
   }
 
-  /**
-   * Reads an integer property.
-   *
-   * @param key property key
-   * @param defaultValue value used when the property is absent or blank
-   * @return parsed integer
-   * @throws NumberFormatException if the resolved value is not a valid decimal integer
-   */
+  /** @return parsed integer property */
   public int intProperty(final String key, final int defaultValue) {
     return Integer.parseInt(property(key, Integer.toString(defaultValue)));
   }
 
-  /**
-   * Reads a boolean property using {@link Boolean#parseBoolean(String)} semantics.
-   *
-   * @param key property key
-   * @param defaultValue value used when the property is absent or blank
-   * @return {@code true} only when the resolved text equals {@code true}, ignoring case
-   */
+  /** @return boolean parsed with {@link Boolean#parseBoolean(String)} */
   public boolean booleanProperty(final String key, final boolean defaultValue) {
     return Boolean.parseBoolean(property(key, Boolean.toString(defaultValue)));
   }
 
   /**
-   * Resolves one enum value from a property, ignoring letter case.
+   * Converts a property key to the environment-variable name understood by this class.
    *
    * @param key property key
-   * @param enumType enum class used for validation
-   * @param defaultValue enum value used when the property is absent or blank
-   * @param <E> enum type
-   * @return resolved enum value
-   * @throws IllegalArgumentException if the configured value does not exist in {@code enumType}
+   * @return upper-case environment-variable name
    */
+  public static String environmentKey(final String key) {
+    final Matcher matcher = CAMEL_CASE_BOUNDARY.matcher(key);
+    final String withCamelCaseSeparated = matcher.replaceAll("$1_$2");
+    return withCamelCaseSeparated.replaceAll("[^A-Za-z0-9]", "_").toUpperCase(Locale.ROOT);
+  }
+
+  /** Resolves a raw value from all supported sources without trimming it. */
+  private String resolvedValue(final String key) {
+    final String systemValue = System.getProperty(key);
+    if (systemValue != null) {
+      return systemValue;
+    }
+    final String environmentValue = System.getenv(environmentKey(key));
+    return environmentValue != null ? environmentValue : this.properties.getProperty(key);
+  }
+
+  /** Resolves one case-insensitive enum property. */
   private <E extends Enum<E>> E enumValue(final String key, final Class<E> enumType, final E defaultValue) {
     final String value = property(key, defaultValue.name());
     try {
@@ -191,17 +170,15 @@ public final class Config {
     }
   }
 
-  /**
-   * Resolves a comma-separated enum list from a property, ignoring letter case and surrounding
-   * whitespace around each token.
-   *
-   * @param key property key
-   * @param enumType enum class used for validation
-   * @param <E> enum type
-   * @return immutable list produced by the stream pipeline; empty when no value is configured
-   * @throws IllegalArgumentException if any non-empty token is not declared by {@code enumType}
-   */
+  /** Resolves a comma-separated case-insensitive enum list. */
   private <E extends Enum<E>> List<E> enumValues(final String key, final Class<E> enumType) {
+    return stringValues(key).stream()
+      .map(value -> Enum.valueOf(enumType, value.toUpperCase(Locale.ROOT)))
+      .toList();
+  }
+
+  /** Resolves a comma-separated list while removing blank tokens. */
+  private List<String> stringValues(final String key) {
     final String configured = property(key, "");
     if (configured.isBlank()) {
       return List.of();
@@ -209,23 +186,16 @@ public final class Config {
     return Arrays.stream(configured.split(","))
       .map(String::trim)
       .filter(value -> !value.isEmpty())
-      .map(value -> Enum.valueOf(enumType, value.toUpperCase(Locale.ROOT)))
       .toList();
   }
 
-  /**
-   * Loads framework defaults from the classpath.
-   *
-   * @return loaded properties
-   * @throws IllegalStateException if the resource is missing or cannot be read
-   */
+  /** Loads framework defaults from the classpath. */
   private static Properties loadProperties() {
     final Properties loaded = new Properties();
     try (InputStream stream = Config.class.getClassLoader().getResourceAsStream(RESOURCE)) {
-      if (stream == null) {
-        throw new IllegalStateException("Configuration resource not found: " + RESOURCE);
+      if (stream != null) {
+        loaded.load(stream);
       }
-      loaded.load(stream);
       return loaded;
     } catch (final IOException ex) {
       throw new IllegalStateException("Unable to read configuration resource: " + RESOURCE, ex);

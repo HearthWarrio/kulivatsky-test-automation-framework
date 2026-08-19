@@ -10,167 +10,174 @@ import java.time.LocalDateTime;
 import java.time.Period;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
 import java.util.Date;
+import java.util.Objects;
 
-/** Creates, shifts, parses, and formats date/time values used by test data and assertions. */
+/**
+ * Creates, shifts, parses, and formats date/time values without changing an instant accidentally.
+ *
+ * <p>{@link Instant} is used for absolute points in time, {@link LocalDateTime} for timezone-free
+ * calendar fields, and {@link ZonedDateTime} when a timezone is part of the value. Legacy
+ * {@link Date} values are created from an {@code Instant}; converting an instant through local
+ * fields is deliberately avoided because that silently shifts the represented moment.</p>
+ */
 public final class DateUtils {
   /** No instances. */
   private DateUtils() {
   }
 
-  /**
-   * Reads the current instant from the system UTC clock.
-   *
-   * @return current UTC instant
-   */
+  /** @return current instant from the system UTC clock */
   public static Instant utcInstant() {
     return Clock.systemUTC().instant();
   }
 
-  /**
-   * Converts the current UTC instant to a legacy {@link Date} through a UTC local date-time.
-   *
-   * @return current date/time represented as {@link Timestamp}
-   */
+  /** @return current instant represented as legacy {@link Date} */
   public static Date utcDate() {
-    return dateOf(utcInstant(), ZoneOffset.UTC);
+    return dateOf(utcInstant());
   }
 
   /**
-   * Adds a time-based duration to the current UTC instant.
+   * Adds an exact duration to the current instant.
    *
-   * @param duration amount of seconds/nanos to add
-   * @return resulting date/time
+   * @param duration amount to add
+   * @return shifted legacy date
    */
   public static Date utcDatePlus(final Duration duration) {
-    return dateOf(utcInstant().plus(duration), ZoneOffset.UTC);
+    return dateOf(utcInstant().plus(Objects.requireNonNull(duration, "duration")));
   }
 
   /**
-   * Adds a calendar-based period to the current UTC local date-time.
-   *
-   * <p>{@link Period} operates on calendar units such as days, months, and years; it is therefore
-   * applied after converting the instant to UTC {@link LocalDateTime}.</p>
+   * Adds a calendar period in UTC, then converts the resulting instant to {@link Date}.
    *
    * @param period calendar period to add
-   * @return resulting date/time
+   * @return shifted legacy date
    */
   public static Date utcDatePlus(final Period period) {
-    return Timestamp.valueOf(LocalDateTime.ofInstant(utcInstant(), ZoneOffset.UTC).plus(period));
+    return dateOf(ZonedDateTime.ofInstant(utcInstant(), ZoneOffset.UTC)
+      .plus(Objects.requireNonNull(period, "period"))
+      .toInstant());
   }
 
   /**
-   * Subtracts a time-based duration from the current UTC instant.
+   * Subtracts an exact duration from the current instant.
    *
    * @param duration amount to subtract
-   * @return resulting date/time
+   * @return shifted legacy date
    */
   public static Date utcDateMinus(final Duration duration) {
-    return dateOf(utcInstant().minus(duration), ZoneOffset.UTC);
+    return dateOf(utcInstant().minus(Objects.requireNonNull(duration, "duration")));
   }
 
   /**
-   * Subtracts a calendar-based period from the current UTC local date-time.
+   * Subtracts a calendar period in UTC, then converts the resulting instant to {@link Date}.
    *
    * @param period calendar period to subtract
-   * @return resulting date/time
+   * @return shifted legacy date
    */
   public static Date utcDateMinus(final Period period) {
-    return Timestamp.valueOf(LocalDateTime.ofInstant(utcInstant(), ZoneOffset.UTC).minus(period));
+    return dateOf(ZonedDateTime.ofInstant(utcInstant(), ZoneOffset.UTC)
+      .minus(Objects.requireNonNull(period, "period"))
+      .toInstant());
   }
 
   /**
-   * Represents the current instant as local date/time in a requested zone and returns it as a
-   * legacy {@link Date}/{@link Timestamp} value.
+   * Represents the current instant together with the requested timezone.
    *
-   * <p>Be aware that {@link Timestamp#valueOf(LocalDateTime)} stores the resulting local fields; use
-   * {@link Instant} directly when absolute-instant semantics are required.</p>
-   *
-   * @param zoneId zone used for local conversion
-   * @return converted date/time
+   * @param zoneId timezone used for calendar fields and offset rules
+   * @return current zoned date/time
    */
-  public static Date dateInZone(final ZoneId zoneId) {
-    return dateOf(utcInstant(), zoneId);
+  public static ZonedDateTime zonedNow(final ZoneId zoneId) {
+    return ZonedDateTime.ofInstant(utcInstant(), Objects.requireNonNull(zoneId, "zoneId"));
   }
 
   /**
-   * Adds a duration to the current instant before converting it to a requested zone.
+   * Adds an exact duration to the current instant and represents it in the requested timezone.
    *
-   * @param zoneId zone used for local conversion
+   * @param zoneId target timezone
    * @param duration amount to add
-   * @return converted date/time
+   * @return shifted zoned date/time
    */
-  public static Date dateInZonePlus(final ZoneId zoneId, final Duration duration) {
-    return dateOf(utcInstant().plus(duration), zoneId);
+  public static ZonedDateTime zonedNowPlus(final ZoneId zoneId, final Duration duration) {
+    return ZonedDateTime.ofInstant(
+      utcInstant().plus(Objects.requireNonNull(duration, "duration")),
+      Objects.requireNonNull(zoneId, "zoneId")
+    );
   }
 
   /**
-   * Subtracts a duration from the current instant before converting it to a requested zone.
+   * Subtracts an exact duration from the current instant and represents it in the requested timezone.
    *
-   * @param zoneId zone used for local conversion
+   * @param zoneId target timezone
    * @param duration amount to subtract
-   * @return converted date/time
+   * @return shifted zoned date/time
    */
-  public static Date dateInZoneMinus(final ZoneId zoneId, final Duration duration) {
-    return dateOf(utcInstant().minus(duration), zoneId);
+  public static ZonedDateTime zonedNowMinus(final ZoneId zoneId, final Duration duration) {
+    return ZonedDateTime.ofInstant(
+      utcInstant().minus(Objects.requireNonNull(duration, "duration")),
+      Objects.requireNonNull(zoneId, "zoneId")
+    );
   }
 
   /**
-   * Converts a {@link LocalDateTime} to a JDBC {@link Timestamp} without applying a time zone.
+   * Converts timezone-free local fields to a JDBC timestamp without applying any timezone.
    *
-   * @param localDateTime local date/time fields
+   * <p>Use {@link #dateOf(LocalDateTime, ZoneId)} when those fields represent local time in a
+   * specific timezone.</p>
+   *
+   * @param localDateTime local calendar fields
    * @return timestamp with the same local fields
    */
   public static Date dateOf(final LocalDateTime localDateTime) {
-    return Timestamp.valueOf(localDateTime);
+    return Timestamp.valueOf(Objects.requireNonNull(localDateTime, "localDateTime"));
   }
 
   /**
-   * Converts an instant through UTC local time.
+   * Converts local calendar fields in a known timezone to an absolute legacy date.
+   *
+   * @param localDateTime local calendar fields
+   * @param zoneId timezone that gives those fields an offset
+   * @return date representing the resulting instant
+   */
+  public static Date dateOf(final LocalDateTime localDateTime, final ZoneId zoneId) {
+    return dateOf(Objects.requireNonNull(localDateTime, "localDateTime")
+      .atZone(Objects.requireNonNull(zoneId, "zoneId"))
+      .toInstant());
+  }
+
+  /**
+   * Converts an absolute instant to a legacy date without changing the represented moment.
    *
    * @param instant instant to convert
-   * @return UTC-based timestamp representation
+   * @return date representing exactly the same instant
    */
   public static Date dateOf(final Instant instant) {
-    return dateOf(instant, ZoneOffset.UTC);
+    return Date.from(Objects.requireNonNull(instant, "instant"));
   }
 
   /**
-   * Converts an instant to local fields in a zone, then stores those fields in a
-   * {@link Timestamp}.
+   * Parses a legacy date with {@link SimpleDateFormat}.
    *
-   * @param instant instant to convert
-   * @param zoneId zone used to derive local fields
-   * @return timestamp created from the zoned local date/time
-   */
-  public static Date dateOf(final Instant instant, final ZoneId zoneId) {
-    return Timestamp.valueOf(LocalDateTime.ofInstant(instant, zoneId));
-  }
-
-  /**
-   * Parses a legacy {@link Date} with {@link SimpleDateFormat}.
-   *
-   * <p>The formatter uses the JVM default locale/time zone because neither is overridden here.</p>
+   * <p>The formatter uses the JVM default locale and timezone because neither is supplied by this
+   * method. Lenient parsing is disabled, so invalid calendar dates are rejected rather than rolled
+   * into a different month. Use the java.time API directly when parsing requires explicit timezone
+   * semantics.</p>
    *
    * @param format {@link SimpleDateFormat} pattern
    * @param value text to parse
    * @return parsed date
-   * @throws IllegalArgumentException when parsing fails
    */
   public static Date dateOf(final String format, final String value) {
+    final SimpleDateFormat formatter = new SimpleDateFormat(format);
+    formatter.setLenient(false);
     try {
-      return new SimpleDateFormat(format).parse(value);
+      return formatter.parse(value);
     } catch (final ParseException ex) {
       throw new IllegalArgumentException("Unable to parse date '" + value + "' with format '" + format + "'", ex);
     }
   }
 
-  /**
-   * Parses an ISO-like calendar date using {@code yyyy-MM-dd}.
-   *
-   * @param value date text
-   * @return parsed legacy date
-   */
+  /** @return parsed date using {@code yyyy-MM-dd} */
   public static Date dateOf(final String value) {
     return dateOf("yyyy-MM-dd", value);
   }
@@ -186,14 +193,7 @@ public final class DateUtils {
     return new SimpleDateFormat(format).format(date);
   }
 
-  /**
-   * Formats a legacy date with millisecond precision and numeric zone offset.
-   *
-   * <p>The formatter uses the JVM default time zone.</p>
-   *
-   * @param date date to format
-   * @return text using {@code yyyy-MM-dd'T'HH:mm:ss.SSSXXX}
-   */
+  /** @return text using {@code yyyy-MM-dd'T'HH:mm:ss.SSSXXX} in the JVM default timezone */
   public static String strDateOf(final Date date) {
     return strDateOf(date, "yyyy-MM-dd'T'HH:mm:ss.SSSXXX");
   }

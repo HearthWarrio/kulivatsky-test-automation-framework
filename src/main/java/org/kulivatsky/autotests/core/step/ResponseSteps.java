@@ -8,13 +8,9 @@ import static io.restassured.module.jsv.JsonSchemaValidator.matchesJsonSchemaInC
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.kulivatsky.autotests.core.step.Params.params;
-import static org.kulivatsky.autotests.core.util.AllureUtils.attachText;
 
 /** Lazy assertions and value extraction for REST Assured responses. */
 public final class ResponseSteps {
-  /** Maximum number of characters attached when a single extracted response value is reported. */
-  private static final int ATTACHMENT_PREVIEW_LIMIT = 500;
-
   /** No instances. */
   private ResponseSteps() {
   }
@@ -95,9 +91,8 @@ public final class ResponseSteps {
    * Creates a step that reads one JSON-path value as text.
    *
    * <p>The decoded value is converted with {@link Objects#toString(Object, String)}. A null JSON
-   * value therefore returns {@code null} and creates no attachment. Non-null text is attached to
-   * Allure, truncated to 500 characters to avoid turning a small extraction step into a report
-   * payload dump.</p>
+   * value therefore returns {@code null}. The extracted value is deliberately not attached to
+   * Allure: a generic JSON path does not tell the framework whether the value is safe report data.</p>
    *
    * @param jsonPath REST Assured JSON-path expression
    * @return response-transforming step that produces the extracted text or {@code null}
@@ -106,16 +101,7 @@ public final class ResponseSteps {
     return new FunctionStep.Of<>(
       "Read response value",
       params("jsonPath", jsonPath),
-      response -> {
-        final Object value = response.jsonPath().get(jsonPath);
-        final String text = Objects.toString(value, null);
-        if (text != null) {
-          attachText("Response value", text.length() <= ATTACHMENT_PREVIEW_LIMIT
-            ? text
-            : text.substring(0, ATTACHMENT_PREVIEW_LIMIT) + "…");
-        }
-        return text;
-      }
+      response -> Objects.toString(response.jsonPath().get(jsonPath), null)
     );
   }
 }

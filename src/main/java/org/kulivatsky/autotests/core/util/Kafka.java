@@ -78,32 +78,49 @@ public final class Kafka {
     try (KafkaProducer<String, String> producer = new KafkaProducer<>(this.properties)) {
       return producer.send(new ProducerRecord<>(topic, key, value))
         .get(this.timeout.toMillis(), TimeUnit.MILLISECONDS);
-    } catch (final Exception ex) {
-      throw new IllegalStateException("Kafka send failed for topic " + topic, ex);
+    } catch (final InterruptedException exception) {
+      Thread.currentThread().interrupt();
+      throw new IllegalStateException("Kafka send interrupted for topic " + topic, exception);
+    } catch (final Exception exception) {
+      throw new IllegalStateException("Kafka send failed for topic " + topic, exception);
     }
   }
 
   /**
-   * Subscribes a temporary consumer to one topic and performs a single Kafka poll.
+   * Subscribes a temporary consumer and waits up to the supplied duration for at least one record.
    *
-   * <p>This method does not loop until records arrive. An empty list is a valid result when the
-   * single poll returns no records. {@code auto.offset.reset=earliest} is supplied only if the
-   * caller's properties did not already configure another policy.</p>
+   * <p>Kafka group assignment commonly needs an initial poll before records can be returned. This
+   * method therefore polls repeatedly in short slices until a record arrives or the overall
+   * deadline expires. The temporary consumer is closed before the method returns.</p>
    *
    * @param topic topic to subscribe to
-   * @param pollDuration maximum duration of the single consumer poll
-   * @return records returned by that poll, in Kafka iteration order
+   * @param pollDuration total time allowed for assignment and polling
+   * @return first non-empty batch observed before the deadline, or an empty list on timeout
+   * @throws IllegalArgumentException when {@code pollDuration} is zero or negative
    */
   public List<ConsumerRecord<String, String>> poll(final String topic, final Duration pollDuration) {
+    if (pollDuration.isZero() || pollDuration.isNegative()) {
+      throw new IllegalArgumentException("pollDuration must be positive");
+    }
     final Properties consumerProperties = new Properties();
     consumerProperties.putAll(this.properties);
     consumerProperties.putIfAbsent(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+    final long deadline = System.nanoTime() + pollDuration.toNanos();
     try (KafkaConsumer<String, String> consumer = new KafkaConsumer<>(consumerProperties)) {
       consumer.subscribe(List.of(topic));
-      final ConsumerRecords<String, String> records = consumer.poll(pollDuration);
-      final List<ConsumerRecord<String, String>> result = new ArrayList<>();
-      records.forEach(result::add);
-      return result;
+      while (true) {
+        final long remainingNanos = deadline - System.nanoTime();
+        if (remainingNanos <= 0) {
+          return List.of();
+        }
+        final Duration slice = Duration.ofNanos(Math.min(remainingNanos, Duration.ofMillis(250).toNanos()));
+        final ConsumerRecords<String, String> records = consumer.poll(slice);
+        if (!records.isEmpty()) {
+          final List<ConsumerRecord<String, String>> result = new ArrayList<>(records.count());
+          records.forEach(result::add);
+          return result;
+        }
+      }
     }
   }
 

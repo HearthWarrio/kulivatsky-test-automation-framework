@@ -1,6 +1,6 @@
 package org.kulivatsky.autotests.core.storage;
 
-import org.kulivatsky.autotests.core.config.APIService;
+import org.kulivatsky.autotests.core.config.Service;
 import org.kulivatsky.autotests.core.config.Config;
 import org.kulivatsky.autotests.core.config.Env;
 
@@ -15,13 +15,13 @@ public final class APIUrlStorage {
   /**
    * Resolves {@code api.<service>.<env>.url} for a service/environment pair.
    *
-   * @param apiService logical service identifier
+   * @param service logical service identifier
    * @param env target environment
    * @return configured base URL
    * @throws java.util.NoSuchElementException when the required property is absent or blank
    */
-  public static String apiUrlFor(final APIService apiService, final Env env) {
-    return Config.current().property(key("api", apiService, env, "url"));
+  public static String apiUrlFor(final Service service, final Env env) {
+    return Config.current().property(key("api", service, env, "url"));
   }
 
   /**
@@ -34,10 +34,10 @@ public final class APIUrlStorage {
    * @return dot-separated configuration key
    */
   private static String key(final String prefix,
-                            final Object service,
+                            final Service service,
                             final Object env,
                             final String suffix) {
-    return String.join(".", prefix, normalize(service), normalize(env), suffix);
+    return String.join(".", prefix, service.id(), normalize(env), suffix);
   }
 
   /**

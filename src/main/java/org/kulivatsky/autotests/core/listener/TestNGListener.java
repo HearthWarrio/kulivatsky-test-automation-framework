@@ -3,17 +3,16 @@ package org.kulivatsky.autotests.core.listener;
 import com.codeborne.selenide.Selenide;
 import com.codeborne.selenide.WebDriverRunner;
 import com.codeborne.selenide.logevents.SelenideLogger;
-import io.qameta.allure.Allure;
-import io.qameta.allure.AllureLifecycle;
-import io.qameta.allure.restassured.AllureRestAssured;
 import io.qameta.allure.selenide.AllureSelenide;
 import io.restassured.RestAssured;
 import org.kulivatsky.autotests.core.annotation.Disabled;
 import org.kulivatsky.autotests.core.annotation.TestInfo;
 import org.kulivatsky.autotests.core.config.Config;
+import org.kulivatsky.autotests.core.config.Project;
+import org.kulivatsky.autotests.core.config.Service;
 import org.kulivatsky.autotests.core.storage.DBConnectionPoolStorage;
 import org.kulivatsky.autotests.core.storage.RestAssuredConfigStorage;
-import org.kulivatsky.autotests.core.storage.SelenideDriverStorage;
+import org.kulivatsky.autotests.core.util.AllureUtils;
 import org.openqa.selenium.OutputType;
 import org.openqa.selenium.TakesScreenshot;
 import org.openqa.selenium.WebDriver;
@@ -28,27 +27,27 @@ import org.testng.annotations.ITestAnnotation;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
-import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 import java.util.NoSuchElementException;
 
 /**
- * TestNG integration point for launch filtering, framework lifecycle, and failure diagnostics.
+ * Opt-in TestNG integration for launch filtering, framework lifecycle, and browser diagnostics.
  *
- * <p>The listener is loaded through TestNG's service-provider mechanism from
- * {@code META-INF/services/org.testng.ITestNGListener}. It has three jobs:</p>
- * <ul>
- *   <li>configure REST Assured and Selenide once per TestNG execution;</li>
- *   <li>disable tests whose {@link TestInfo} metadata does not match the current launch;</li>
- *   <li>bind the currently running test to its thread and attach browser evidence on failure.</li>
- * </ul>
+ * <p>The framework does not register this listener through {@code META-INF/services}. A consumer
+ * must enable it explicitly in the TestNG runner configuration, for example through suite XML or
+ * Maven Surefire's {@code listener} provider property. Do not register it with TestNG's
+ * {@code @Listeners} annotation: {@link IAnnotationTransformer} implementations must be known before
+ * TestNG processes test annotations. Merely adding the framework JAR to a classpath therefore does
+ * not mutate REST Assured or Selenide global state.</p>
  *
- * <p>{@link #currentTest()} is thread-local. Code that calls it outside a running TestNG
- * test method fails immediately instead of accidentally sharing another test's state.</p>
+ * <p>Raw REST request/response bodies are not attached automatically. This is deliberate: generic
+ * transport filters cannot know which customer fields are safe to publish in a report. Framework
+ * steps and explicit attachments remain available and are masked by the reporting layer.</p>
  */
 public final class TestNGListener implements IExecutionListener, IInvokedMethodListener, IAnnotationTransformer {
-  /** Logger used for lifecycle messages and non-fatal cleanup failures. */
+  /** Logger used for lifecycle messages and non-fatal diagnostic failures. */
   private static final Logger LOGGER = LoggerFactory.getLogger(TestNGListener.class);
   /** Test result associated with the thread currently executing a TestNG test method. */
   private static final ThreadLocal<ITestResult> CURRENT_TEST = new ThreadLocal<>();
@@ -56,7 +55,7 @@ public final class TestNGListener implements IExecutionListener, IInvokedMethodL
   /**
    * Returns the TestNG result bound to the current thread.
    *
-   * @return result of the test method currently being invoked
+   * @return result of the currently executing test method
    * @throws NoSuchElementException when called outside a running test invocation on this thread
    */
   public static ITestResult currentTest() {
@@ -68,37 +67,30 @@ public final class TestNGListener implements IExecutionListener, IInvokedMethodL
   }
 
   /**
-   * Applies process-wide HTTP reporting and Selenide reporting defaults before tests start.
+   * Applies framework REST Assured defaults and registers Selenide's Allure event listener.
    *
-   * <p>REST Assured receives the framework timeout/SSL configuration and an Allure filter.
-   * Selenide keeps its normal screenshots/page-source behavior disabled in the Allure listener
-   * because this class attaches those artifacts explicitly only when a test fails.</p>
+   * <p>Request/response console logging on validation failure is disabled by default because it can
+   * expose credentials or payload data in CI logs. Set {@code rest.logOnValidationFailure=true}
+   * only in an environment where such output is acceptable.</p>
    */
   @Override
   public void onExecutionStart() {
     RestAssured.config = RestAssuredConfigStorage.config();
-    RestAssured.enableLoggingOfRequestAndResponseIfValidationFails();
-    RestAssured.filters(new AllureRestAssured());
+    if (Config.current().booleanProperty("rest.logOnValidationFailure", false)) {
+      RestAssured.enableLoggingOfRequestAndResponseIfValidationFails();
+    }
     SelenideLogger.addListener("AllureSelenide", new AllureSelenide().screenshots(false).savePageSource(false));
   }
 
-  /**
-   * Closes framework-managed browser drivers and database pools after the TestNG run.
-   *
-   * <p>Both storages also have JVM shutdown hooks; calling them here releases resources promptly
-   * during a normal test run instead of waiting for process termination.</p>
-   */
+  /** Releases shared database pools and the Selenide report listener after the TestNG execution. */
   @Override
   public void onExecutionFinish() {
-    SelenideDriverStorage.closeAll();
     DBConnectionPoolStorage.closeAll();
+    SelenideLogger.removeListener("AllureSelenide");
   }
 
   /**
-   * Applies {@link Disabled} and {@link TestInfo} metadata to TestNG before method execution.
-   *
-   * <p>A non-empty annotation selection acts as an allow-list for that dimension. If the launch
-   * selection is empty, the dimension is not filtered. The first mismatch disables the method.</p>
+   * Applies {@link Disabled} and {@link TestInfo} filters before a test method is scheduled.
    *
    * @param annotation mutable TestNG annotation being transformed
    * @param testClass declaring class supplied by TestNG; may be {@code null}
@@ -139,21 +131,13 @@ public final class TestNGListener implements IExecutionListener, IInvokedMethodL
     if (!matchesSelection(info.testType(), config.testType())
       || !matchesSelection(info.testSubject(), config.testSubject())
       || !matchesSelection(info.testLevel(), config.testLevel())
-      || !matchesSelection(info.project(), config.project())
-      || !matchesSelection(info.apiService(), config.apiService())) {
+      || !matchesIds(info.project(), config.project().stream().map(Project::id).toList())
+      || !matchesIds(info.service(), config.service().stream().map(Service::id).toList())) {
       annotation.setEnabled(false);
     }
   }
 
-  /**
-   * Binds a test result to the current thread immediately before a TestNG test method runs.
-   *
-   * <p>Configuration methods are ignored. The binding is consumed by per-test storages such as
-   * {@link SelenideDriverStorage}.</p>
-   *
-   * @param method invoked TestNG method
-   * @param testResult result object for the invocation
-   */
+  /** Binds the current test result to its worker thread before test execution. */
   @Override
   public void beforeInvocation(final IInvokedMethod method, final ITestResult testResult) {
     if (!testResult.getMethod().isTest()) {
@@ -165,15 +149,10 @@ public final class TestNGListener implements IExecutionListener, IInvokedMethodL
   }
 
   /**
-   * Performs failure diagnostics and per-test browser cleanup after a TestNG test method.
+   * Attaches browser diagnostics after failures and closes Selenide's default driver after each test.
    *
-   * <p>When the test failed, diagnostics are collected from both Selenide's default driver and a
-   * driver stored under the test id. Cleanup runs regardless of diagnostic failures, and the
-   * thread-local binding is removed in a {@code finally} block to prevent state leaking into the
-   * next invocation on a reused worker thread.</p>
-   *
-   * @param method invoked TestNG method
-   * @param testResult completed result object
+   * <p>The thread-local binding is always cleared, including when diagnostics or browser shutdown
+   * fail. Diagnostic failures are logged and never replace the original test result.</p>
    */
   @Override
   public void afterInvocation(final IInvokedMethod method, final ITestResult testResult) {
@@ -183,21 +162,25 @@ public final class TestNGListener implements IExecutionListener, IInvokedMethodL
     try {
       if (testResult.getStatus() == ITestResult.FAILURE) {
         attachBrowserState();
-        final var storedDriver = SelenideDriverStorage.get(testResult.id());
-        if (storedDriver != null && storedDriver.hasWebDriverStarted()) {
-          attachBrowserState(storedDriver.getWebDriver());
-        }
       }
-      SelenideDriverStorage.close(testResult.id());
       if (WebDriverRunner.hasWebDriverStarted()) {
-        Selenide.closeWebDriver();
+        try {
+          Selenide.closeWebDriver();
+        } catch (final RuntimeException ex) {
+          LOGGER.warn("Unable to close Selenide WebDriver after test {}", testResult.getName(), ex);
+        }
       }
     } finally {
       CURRENT_TEST.remove();
     }
   }
 
-  /** Attaches diagnostics for Selenide's default driver when that driver has been started. */
+  /**
+   * Attaches explicitly enabled diagnostics for Selenide's default driver when one exists.
+   *
+   * <p>Browser artifacts are disabled by default because screenshots cannot be redacted and page
+   * source may contain business data that does not match credential-oriented masking rules.</p>
+   */
   private static void attachBrowserState() {
     if (WebDriverRunner.hasWebDriverStarted()) {
       attachBrowserState(WebDriverRunner.getWebDriver());
@@ -205,38 +188,63 @@ public final class TestNGListener implements IExecutionListener, IInvokedMethodL
   }
 
   /**
-   * Adds a screenshot, page source, and current URL to the active Allure test when possible.
+   * Adds only the browser diagnostics explicitly enabled by report configuration.
    *
-   * <p>Diagnostic collection is best-effort: a stale or already closed browser must
-   * not hide the original test failure. Any runtime exception is logged and swallowed.</p>
+   * <p>{@code report.browser.screenshot.enabled}, {@code report.browser.pageSource.enabled}, and
+   * {@code report.browser.url.enabled} all default to {@code false}. A screenshot is raw binary data
+   * and therefore cannot pass through the text masker. Page source and URL use normal text redaction
+   * when enabled, but redaction cannot classify arbitrary business data, so neither is implicit.</p>
    *
    * @param driver driver from which diagnostics are collected
    */
   private static void attachBrowserState(final WebDriver driver) {
-    final AllureLifecycle lifecycle = Allure.getLifecycle();
     try {
-      if (driver instanceof TakesScreenshot screenshotDriver) {
-        lifecycle.addAttachment("Screenshot", "image/png", "png", screenshotDriver.getScreenshotAs(OutputType.BYTES));
+      final Config config = Config.current();
+      if (config.booleanProperty("report.browser.screenshot.enabled", false)
+        && driver instanceof TakesScreenshot screenshotDriver) {
+        AllureUtils.attachBytes("Screenshot", "image/png", "png", screenshotDriver.getScreenshotAs(OutputType.BYTES));
       }
-      lifecycle.addAttachment("Page source", "text/html", "html", driver.getPageSource().getBytes(StandardCharsets.UTF_8));
-      lifecycle.addAttachment("Current URL", "text/plain", "txt", driver.getCurrentUrl().getBytes(StandardCharsets.UTF_8));
+      if (config.booleanProperty("report.browser.pageSource.enabled", false)) {
+        AllureUtils.attachUtf8("Page source", "text/html", "html", driver.getPageSource());
+      }
+      if (config.booleanProperty("report.browser.url.enabled", false)) {
+        AllureUtils.attachText("Current URL", driver.getCurrentUrl());
+      }
     } catch (final RuntimeException ex) {
       LOGGER.warn("Unable to attach browser diagnostics", ex);
     }
   }
 
-  /**
-   * Tests one launch-filter dimension.
-   *
-   * @param allowedByTest values accepted by the test annotation
-   * @param selectedByLaunch values requested for the current launch
-   * @param <T> selection value type
-   * @return {@code true} when either side is unrestricted, or when at least one value intersects
-   */
+  /** Returns whether generic launch selections intersect or either side is unrestricted. */
   private static <T> boolean matchesSelection(final T[] allowedByTest, final List<? super T> selectedByLaunch) {
     if (allowedByTest.length == 0 || selectedByLaunch.isEmpty()) {
       return true;
     }
     return Arrays.stream(allowedByTest).anyMatch(selectedByLaunch::contains);
+  }
+
+  /**
+   * Returns whether normalized ids intersect or either side is unrestricted.
+   *
+   * <p>Annotation values are validated here rather than silently ignored. Project and service ids
+   * share the same configuration-safe syntax: lower-case letters, digits, and underscores after
+   * normalization.</p>
+   */
+  private static boolean matchesIds(final String[] allowedByTest, final List<String> selectedByLaunch) {
+    if (allowedByTest.length == 0 || selectedByLaunch.isEmpty()) {
+      return true;
+    }
+    return Arrays.stream(allowedByTest)
+      .map(TestNGListener::normalizeId)
+      .anyMatch(selectedByLaunch::contains);
+  }
+
+  /** Validates and normalizes an id declared directly in {@link TestInfo}. */
+  private static String normalizeId(final String value) {
+    final String normalized = value.trim().toLowerCase(Locale.ROOT);
+    if (normalized.isEmpty() || !normalized.matches("[a-z0-9_]+")) {
+      throw new IllegalArgumentException("TestInfo project/service id must match [a-z0-9_]+: " + value);
+    }
+    return normalized;
   }
 }

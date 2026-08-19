@@ -6,6 +6,7 @@ import javax.sql.DataSource;
 import java.sql.SQLException;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Thin JDBC facade with explicit data-source ownership semantics.
@@ -32,7 +33,7 @@ public final class Database implements AutoCloseable {
    * @param ownsDataSource whether {@link #close()} owns lifecycle of a DBCP data source
    */
   private Database(final DataSource dataSource, final boolean ownsDataSource) {
-    this.dataSource = dataSource;
+    this.dataSource = Objects.requireNonNull(dataSource, "dataSource");
     this.ownsDataSource = ownsDataSource;
   }
 

@@ -3,8 +3,9 @@ package org.kulivatsky.autotests.core.step;
 import com.codeborne.selenide.Selenide;
 import com.codeborne.selenide.WebDriverRunner;
 import org.openqa.selenium.Cookie;
+import org.openqa.selenium.WebDriver;
 
-import java.util.ArrayList;
+import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.Set;
 
@@ -16,40 +17,23 @@ public final class SelenideSteps {
   private SelenideSteps() {
   }
 
-  /**
-   * Creates a step that opens a URL using Selenide's default driver.
-   *
-   * @param url URL accepted by {@link Selenide#open(String)}
-   * @return lazy browser step
-   */
+  /** @return step that opens a URL using Selenide's default driver */
   public static RunnableStep open(final String url) {
     return new RunnableStep.Of("Open page", params("url", url), () -> Selenide.open(url));
   }
 
-  /**
-   * Creates a step that closes Selenide's default WebDriver.
-   *
-   * @return lazy browser step
-   */
+  /** @return step that closes Selenide's default WebDriver */
   public static RunnableStep close() {
     return new RunnableStep.Of("Close browser", Selenide::closeWebDriver);
   }
 
-  /**
-   * Creates a step that refreshes the current page.
-   *
-   * @return lazy browser step
-   */
+  /** @return step that refreshes the current page */
   public static RunnableStep refresh() {
     return new RunnableStep.Of("Refresh page", Selenide::refresh);
   }
 
   /**
-   * Creates a step that discards the current default browser session and opens a fresh one.
-   *
-   * <p>If a driver already exists, cookies and local storage are cleared before the driver is
-   * closed. A new driver is then created by {@link Selenide#open(String)} according to the current
-   * Selenide configuration.</p>
+   * Creates a step that discards the current browser session and opens a fresh one.
    *
    * @param url first URL opened in the fresh session
    * @return lazy browser step
@@ -66,28 +50,47 @@ public final class SelenideSteps {
   }
 
   /**
-   * Creates a step that switches to a browser window by zero-based position.
+   * Switches to an exact Selenium window handle.
    *
-   * <p>Selenium exposes window handles as a set. This method copies the set to a list and indexes
-   * that iteration order; callers should use it only when their driver provides a stable handle
-   * order for the opened tabs.</p>
-   *
-   * @param number zero-based index in the current window-handle iteration order
+   * @param handle handle returned by Selenium
    * @return lazy browser step
-   * @throws IndexOutOfBoundsException when executed with an index outside the current handle list
    */
-  public static RunnableStep switchToWindow(final int number) {
-    return new RunnableStep.Of("Switch browser tab", params("tabIndex", number), () -> {
-      final ArrayList<String> tabs = new ArrayList<>(WebDriverRunner.getWebDriver().getWindowHandles());
-      if (number < 0 || number >= tabs.size()) {
-        throw new IndexOutOfBoundsException("Browser tab index " + number + " is outside 0.." + (tabs.size() - 1));
-      }
-      WebDriverRunner.getWebDriver().switchTo().window(tabs.get(number));
-    });
+  public static RunnableStep switchToWindow(final String handle) {
+    return new RunnableStep.Of("Switch browser window", params("handle", handle), () ->
+      WebDriverRunner.getWebDriver().switchTo().window(handle)
+    );
   }
 
   /**
-   * Reads a cookie from the current default browser session.
+   * Switches to the first open window whose title equals the requested value.
+   *
+   * <p>The original window is restored when no match exists.</p>
+   *
+   * @param title exact browser title
+   * @return lazy browser step
+   */
+  public static RunnableStep switchToWindowByTitle(final String title) {
+    return new RunnableStep.Of("Switch browser window by title", params("title", title), () ->
+      switchToMatchingWindow(driver -> Objects.equals(driver.getTitle(), title), "title", title)
+    );
+  }
+
+  /**
+   * Switches to the first open window whose URL equals the requested value.
+   *
+   * <p>The original window is restored when no match exists.</p>
+   *
+   * @param url exact browser URL
+   * @return lazy browser step
+   */
+  public static RunnableStep switchToWindowByUrl(final String url) {
+    return new RunnableStep.Of("Switch browser window by URL", params("url", url), () ->
+      switchToMatchingWindow(driver -> Objects.equals(driver.getCurrentUrl(), url), "URL", url)
+    );
+  }
+
+  /**
+   * Reads a cookie from the current browser session.
    *
    * @param cookieName exact cookie name
    * @return cookie value
@@ -98,12 +101,24 @@ public final class SelenideSteps {
     return Objects.requireNonNull(cookie, "Cookie not found: " + cookieName).getValue();
   }
 
-  /**
-   * Returns cookies visible to the current default browser session.
-   *
-   * @return Selenium cookie set for the current page/domain
-   */
+  /** @return cookies visible to the current browser session */
   public static Set<Cookie> getCookies() {
     return WebDriverRunner.getWebDriver().manage().getCookies();
+  }
+
+  /** Tries each current handle and restores the original handle when no window matches. */
+  private static void switchToMatchingWindow(final java.util.function.Predicate<WebDriver> matcher,
+                                             final String selectorName,
+                                             final String selectorValue) {
+    final WebDriver driver = WebDriverRunner.getWebDriver();
+    final String originalHandle = driver.getWindowHandle();
+    for (final String handle : driver.getWindowHandles()) {
+      driver.switchTo().window(handle);
+      if (matcher.test(driver)) {
+        return;
+      }
+    }
+    driver.switchTo().window(originalHandle);
+    throw new NoSuchElementException("No browser window with " + selectorName + ": " + selectorValue);
   }
 }
