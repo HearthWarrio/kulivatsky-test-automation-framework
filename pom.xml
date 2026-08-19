@@ -33,7 +33,7 @@
     <restAssured.version>5.5.0</restAssured.version>
     <allure.version>2.29.0</allure.version>
     <aspectj.version>1.9.22.1</aspectj.version>
-    <jackson.version>2.18.9</jackson.version>
+    <jackson.version>2.22.1</jackson.version>
     <testcontainers.version>2.0.5</testcontainers.version>
 
     <test.excludedGroups>ui,container</test.excludedGroups>
