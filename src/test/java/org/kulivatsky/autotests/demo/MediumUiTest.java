@@ -18,20 +18,37 @@ import static org.kulivatsky.autotests.core.step.Steps.step;
 public final class MediumUiTest {
   /** Local server that hosts the demo catalog page. */
   private DemoServer server;
+  /** Selenide headless setting that existed before this demo method changed global configuration. */
+  private boolean previousHeadless;
+  /** Selenide browser size that existed before this demo method changed global configuration. */
+  private String previousBrowserSize;
+  /** Whether the previous global Selenide configuration has been captured for restoration. */
+  private boolean configurationCaptured;
 
   /** Configures a headless browser and starts the local catalog server. */
   @BeforeMethod
   public void setUp() {
+    this.previousHeadless = Configuration.headless;
+    this.previousBrowserSize = Configuration.browserSize;
+    this.configurationCaptured = true;
     Configuration.headless = true;
     Configuration.browserSize = "1440x900";
     this.server = new DemoServer();
   }
 
-  /** Stops the local HTTP server; WebDriver cleanup is handled by the framework listener. */
+  /** Stops the local server and restores the Selenide globals changed by {@link #setUp()}. */
   @AfterMethod(alwaysRun = true)
   public void tearDown() {
-    if (this.server != null) {
-      this.server.close();
+    try {
+      if (this.server != null) {
+        this.server.close();
+      }
+    } finally {
+      if (this.configurationCaptured) {
+        Configuration.headless = this.previousHeadless;
+        Configuration.browserSize = this.previousBrowserSize;
+        this.configurationCaptured = false;
+      }
     }
   }
 

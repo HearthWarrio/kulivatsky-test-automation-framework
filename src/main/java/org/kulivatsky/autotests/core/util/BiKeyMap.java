@@ -235,12 +235,13 @@ public interface BiKeyMap<K1, K2, V> {
     /**
      * Creates an immutable composite key.
      *
-     * @param key1 first component
-     * @param key2 second component
+     * @param key1 non-null first component
+     * @param key2 non-null second component
+     * @throws NullPointerException when either key component is null
      */
     private BiKeyImpl(final K1 key1, final K2 key2) {
-      this.key1 = key1;
-      this.key2 = key2;
+      this.key1 = Objects.requireNonNull(key1, "key1");
+      this.key2 = Objects.requireNonNull(key2, "key2");
     }
 
     /** {@inheritDoc} */

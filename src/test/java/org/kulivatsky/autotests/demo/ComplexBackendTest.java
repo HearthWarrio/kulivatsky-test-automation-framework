@@ -104,11 +104,7 @@ public final class ComplexBackendTest {
   @AfterMethod(alwaysRun = true)
   public void tearDown() {
     final List<RuntimeException> failures = new ArrayList<>();
-    cleanup(failures, () -> {
-      if (this.scheduler != null) {
-        this.scheduler.shutdownNow();
-      }
-    });
+    cleanup(failures, this::stopScheduler);
     cleanup(failures, () -> {
       if (this.producer != null) {
         this.producer.close();
@@ -205,6 +201,28 @@ public final class ComplexBackendTest {
       throw new IllegalStateException("Interrupted while creating Kafka topic " + TOPIC, exception);
     } catch (final Exception exception) {
       throw new IllegalStateException("Cannot create Kafka topic " + TOPIC, exception);
+    }
+  }
+
+  /**
+   * Stops the scheduler and waits until no background database update can still be running.
+   *
+   * <p>{@code shutdownNow()} only requests interruption; it is not a termination barrier. Waiting
+   * here prevents the following pool/container cleanup from racing an update that was already
+   * executing when teardown started.</p>
+   */
+  private void stopScheduler() {
+    if (this.scheduler == null) {
+      return;
+    }
+    this.scheduler.shutdownNow();
+    try {
+      if (!this.scheduler.awaitTermination(10, TimeUnit.SECONDS)) {
+        throw new IllegalStateException("Demo scheduler did not terminate within 10 seconds");
+      }
+    } catch (final InterruptedException ex) {
+      Thread.currentThread().interrupt();
+      throw new IllegalStateException("Interrupted while waiting for demo scheduler shutdown", ex);
     }
   }
 

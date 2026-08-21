@@ -5,8 +5,6 @@ import io.restassured.response.Response;
 import java.util.Objects;
 
 import static io.restassured.module.jsv.JsonSchemaValidator.matchesJsonSchemaInClasspath;
-import static org.hamcrest.Matchers.containsString;
-import static org.hamcrest.Matchers.equalTo;
 import static org.kulivatsky.autotests.core.step.Params.params;
 import static org.kulivatsky.autotests.core.step.Params.secret;
 
@@ -26,15 +24,23 @@ public final class ResponseSteps {
     return new ConsumerStep.Of<>(
       "Response status code is " + expectedStatusCode,
       params("expectedStatusCode", expectedStatusCode),
-      response -> response.then().statusCode(expectedStatusCode)
+      response -> {
+        final int actualStatusCode = response.statusCode();
+        if (actualStatusCode != expectedStatusCode) {
+          throw new AssertionError(
+            "Expected HTTP status %d but was %d".formatted(expectedStatusCode, actualStatusCode)
+          );
+        }
+      }
     );
   }
 
   /**
    * Creates a step that checks one response header for exact string equality.
    *
-   * <p>The expected value is masked in Allure regardless of the header name. This prevents a
-   * credential-bearing header from leaking through the generic {@code expectedValue} parameter.</p>
+   * <p>The expected value is masked in Allure and a failed assertion deliberately omits both
+   * expected and actual header values. This prevents credentials from reappearing through an
+   * assertion message after the step parameters have already been masked.</p>
    *
    * @param header header name
    * @param expectedValue exact expected value
@@ -44,15 +50,19 @@ public final class ResponseSteps {
     return new ConsumerStep.Of<>(
       "Response header has expected value",
       params("header", header, "expectedValue", secret(expectedValue)),
-      response -> response.then().header(header, equalTo(expectedValue))
+      response -> {
+        final String actualValue = response.getHeader(header);
+        if (!Objects.equals(actualValue, expectedValue)) {
+          throw new AssertionError("Response header did not match the expected value: " + header);
+        }
+      }
     );
   }
 
   /**
    * Creates a step that checks whether the raw response body contains text.
    *
-   * <p>The expected text is masked in Allure because arbitrary response fragments may themselves
-   * be credentials, tokens, identifiers, or personal data.</p>
+   * <p>The expected text is masked in Allure and is not copied into a failed assertion message.</p>
    *
    * @param expectedText text that must occur in the response body
    * @return response-consuming assertion step
@@ -61,16 +71,20 @@ public final class ResponseSteps {
     return new ConsumerStep.Of<>(
       "Response body contains expected text",
       params("expectedText", secret(expectedText)),
-      response -> response.then().body(containsString(expectedText))
+      response -> {
+        if (!response.asString().contains(expectedText)) {
+          throw new AssertionError("Response body did not contain the expected text");
+        }
+      }
     );
   }
 
   /**
    * Creates a step that checks a REST Assured JSON-path expression for exact equality.
    *
-   * <p>The expected value is masked in Allure. A JSON path such as {@code access_token} identifies
-   * sensitive data, but once stored as a generic {@code expectedValue} parameter the value cannot
-   * be classified safely by name alone.</p>
+   * <p>The expected value is masked in Allure. A failure message contains the JSON path but not the
+   * expected or actual value, because either may be a token, identifier, or other report-sensitive
+   * value.</p>
    *
    * @param jsonPath REST Assured JSON-path expression
    * @param expectedValue expected decoded value
@@ -80,7 +94,12 @@ public final class ResponseSteps {
     return new ConsumerStep.Of<>(
       "Response JSON value matches",
       params("jsonPath", jsonPath, "expectedValue", secret(expectedValue)),
-      response -> response.then().body(jsonPath, equalTo(expectedValue))
+      response -> {
+        final Object actualValue = response.jsonPath().get(jsonPath);
+        if (!Objects.equals(actualValue, expectedValue)) {
+          throw new AssertionError("Response JSON value did not match at path: " + jsonPath);
+        }
+      }
     );
   }
 

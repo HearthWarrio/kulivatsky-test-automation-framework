@@ -34,9 +34,10 @@ public final class Kafka {
   private final Duration timeout;
 
   /**
-   * Creates a facade from a defensive copy of client properties.
+   * Creates a facade from defensive copies of producer and consumer properties.
    *
-   * @param properties Kafka client properties
+   * @param producerProperties properties used by short-lived producers
+   * @param consumerProperties properties used by short-lived consumers
    * @param timeout producer acknowledgement timeout
    */
   private Kafka(final Properties producerProperties,
@@ -126,8 +127,10 @@ public final class Kafka {
    * Waits for records that satisfy a caller-supplied correlation predicate.
    *
    * <p>Non-matching records are consumed by the temporary consumer but are not returned and do not
-   * end the wait. This makes the method usable on shared topics where historical or parallel-test
-   * traffic may arrive before the record a test is interested in.</p>
+   * end the wait. Auto-commit is forcibly disabled for this short-lived consumer, so merely looking
+   * past unrelated records cannot advance a shared consumer group's committed offset. The facade
+   * does not commit offsets at all; callers that need durable group progress should own a long-lived
+   * consumer from {@code KafkaStorage.consumerFor(...)} instead.</p>
    *
    * @param topic topic to subscribe to
    * @param predicate correlation predicate applied to each consumed record
@@ -144,11 +147,14 @@ public final class Kafka {
     final Properties consumerProperties = new Properties();
     consumerProperties.putAll(this.consumerProperties);
     consumerProperties.putIfAbsent(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
-    final long deadline = deadline(timeout);
+    consumerProperties.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
+    final long timeoutNanos = timeoutNanos(timeout);
+    final long startedAt = System.nanoTime();
     try (KafkaConsumer<String, String> consumer = new KafkaConsumer<>(consumerProperties)) {
       consumer.subscribe(List.of(topic));
       while (true) {
-        final long remainingNanos = deadline - System.nanoTime();
+        final long elapsedNanos = System.nanoTime() - startedAt;
+        final long remainingNanos = timeoutNanos - elapsedNanos;
         if (remainingNanos <= 0) {
           return List.of();
         }
@@ -167,15 +173,13 @@ public final class Kafka {
     }
   }
 
-  /** Converts a positive duration to a monotonic deadline and rejects values that cannot fit in nanoseconds. */
-  private static long deadline(final Duration duration) {
-    final long durationNanos;
+  /** Converts a positive duration to nanoseconds and rejects values that cannot fit in a {@code long}. */
+  private static long timeoutNanos(final Duration duration) {
     try {
-      durationNanos = duration.toNanos();
+      return duration.toNanos();
     } catch (final ArithmeticException ex) {
       throw new IllegalArgumentException("pollDuration is too large", ex);
     }
-    return System.nanoTime() + durationNanos;
   }
 
   /** Copies a caller-owned properties object before it can be mutated elsewhere. */

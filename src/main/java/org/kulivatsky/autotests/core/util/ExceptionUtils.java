@@ -22,6 +22,42 @@ public final class ExceptionUtils {
   }
 
   /**
+   * Immediately rethrows JVM- or thread-fatal failures that framework diagnostics must not hide.
+   *
+   * <p>{@code VirtualMachineError} subclasses are detected directly. {@code ThreadDeath} is
+   * recognized by its runtime type hierarchy without linking against the deprecated-for-removal
+   * class, which keeps Java 21+ builds free of removal warnings.</p>
+   *
+   * @param throwable failure observed while framework reporting or cleanup is running
+   */
+  public static void rethrowIfFatal(final Throwable throwable) {
+    if (isFatal(throwable)) {
+      ExceptionUtils.sneakyThrow(throwable);
+    }
+  }
+
+  /**
+   * Returns whether a failure should escape framework reporting/cleanup immediately.
+   *
+   * @param throwable failure to classify
+   * @return {@code true} for JVM-fatal errors and thread termination
+   */
+  public static boolean isFatal(final Throwable throwable) {
+    return throwable instanceof VirtualMachineError
+      || hasTypeName(throwable.getClass(), "java.lang.ThreadDeath");
+  }
+
+  /** Returns whether a runtime type or one of its superclasses has the supplied binary name. */
+  private static boolean hasTypeName(final Class<?> type, final String binaryName) {
+    for (Class<?> current = type; current != null; current = current.getSuperclass()) {
+      if (binaryName.equals(current.getName())) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
    * Rethrows a throwable without wrapping it and presents the expression as a
    * {@link RuntimeException} to the Java compiler.
    *

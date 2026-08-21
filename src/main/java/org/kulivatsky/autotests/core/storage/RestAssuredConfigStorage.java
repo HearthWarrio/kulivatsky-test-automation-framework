@@ -1,6 +1,7 @@
 package org.kulivatsky.autotests.core.storage;
 
 import io.restassured.config.HttpClientConfig;
+import io.restassured.config.LogConfig;
 import io.restassured.config.RestAssuredConfig;
 import io.restassured.config.SSLConfig;
 import org.kulivatsky.autotests.core.config.Config;
@@ -16,7 +17,9 @@ public final class RestAssuredConfigStorage {
    *
    * <p>{@code rest.timeoutMs} is applied to both socket and connection timeouts. Relaxed HTTPS
    * validation is disabled by default and is enabled only when
-   * {@code rest.relaxedHttpsValidation=true} is explicitly configured.</p>
+   * {@code rest.relaxedHttpsValidation=true} is explicitly configured. Validation-failure logging
+   * is also expressed through this returned configuration rather than a second REST Assured global
+   * mutation.</p>
    *
    * @return newly built REST Assured configuration
    */
@@ -30,6 +33,9 @@ public final class RestAssuredConfigStorage {
     );
     if (config.booleanProperty("rest.relaxedHttpsValidation", false)) {
       result = result.sslConfig(new SSLConfig().relaxedHTTPSValidation());
+    }
+    if (config.booleanProperty("rest.logOnValidationFailure", false)) {
+      result = result.logConfig(LogConfig.logConfig().enableLoggingOfRequestAndResponseIfValidationFails());
     }
     return result;
   }

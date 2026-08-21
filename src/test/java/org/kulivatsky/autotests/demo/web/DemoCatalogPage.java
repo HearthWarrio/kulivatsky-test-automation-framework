@@ -1,12 +1,12 @@
 package org.kulivatsky.autotests.demo.web;
 
 import com.codeborne.selenide.SelenideElement;
-import io.qameta.allure.Step;
 import org.kulivatsky.autotests.core.annotation.Page;
 import org.kulivatsky.autotests.core.web.BasePage;
 
 import static com.codeborne.selenide.Condition.text;
 import static com.codeborne.selenide.Selenide.$;
+import static org.kulivatsky.autotests.core.step.Steps.step;
 
 /** Page object for the local catalog used by {@code MediumUiTest}. */
 @Page(title = "Demo Catalog")
@@ -21,9 +21,8 @@ public final class DemoCatalogPage extends BasePage {
    *
    * @return this page object for fluent assertions/actions
    */
-  @Step("Add product to cart")
   public DemoCatalogPage addProductToCart() {
-    safeClick(this.addItemButton);
+    step("Add product to cart", () -> safeClick(this.addItemButton));
     return this;
   }
 
@@ -32,9 +31,8 @@ public final class DemoCatalogPage extends BasePage {
    *
    * @return this page object for further chaining
    */
-  @Step("Cart contains one item")
   public DemoCatalogPage cartContainsOneItem() {
-    this.cart.shouldHave(text("1 item in cart"));
+    step("Cart contains one item", () -> this.cart.shouldHave(text("1 item in cart")));
     return this;
   }
 }

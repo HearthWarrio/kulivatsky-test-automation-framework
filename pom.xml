@@ -32,7 +32,6 @@
 
     <restAssured.version>5.5.0</restAssured.version>
     <allure.version>2.29.0</allure.version>
-    <aspectj.version>1.9.22.1</aspectj.version>
     <jackson.version>2.18.9</jackson.version>
     <testcontainers.version>2.0.5</testcontainers.version>
 
@@ -49,11 +48,6 @@
     <dependency>
       <groupId>io.qameta.allure</groupId>
       <artifactId>allure-testng</artifactId>
-      <version>${allure.version}</version>
-    </dependency>
-    <dependency>
-      <groupId>io.qameta.allure</groupId>
-      <artifactId>allure-selenide</artifactId>
       <version>${allure.version}</version>
     </dependency>
 
@@ -134,12 +128,6 @@
     </dependency>
 
     <dependency>
-      <groupId>org.aspectj</groupId>
-      <artifactId>aspectjweaver</artifactId>
-      <version>${aspectj.version}</version>
-      <scope>test</scope>
-    </dependency>
-    <dependency>
       <groupId>org.testcontainers</groupId>
       <artifactId>testcontainers-kafka</artifactId>
       <version>${testcontainers.version}</version>
@@ -167,7 +155,6 @@
         <version>3.5.5</version>
         <configuration>
           <excludedGroups>${test.excludedGroups}</excludedGroups>
-          <argLine>-javaagent:${settings.localRepository}/org/aspectj/aspectjweaver/${aspectj.version}/aspectjweaver-${aspectj.version}.jar</argLine>
           <properties>
             <property>
               <name>listener</name>

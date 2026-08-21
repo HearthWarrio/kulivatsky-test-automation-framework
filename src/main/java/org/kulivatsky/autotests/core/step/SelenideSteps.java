@@ -10,6 +10,7 @@ import java.util.Objects;
 import java.util.Set;
 
 import static org.kulivatsky.autotests.core.step.Params.params;
+import static org.kulivatsky.autotests.core.step.Params.secret;
 
 /** Builds browser step descriptors and reads state from Selenide's default driver. */
 public final class SelenideSteps {
@@ -70,7 +71,7 @@ public final class SelenideSteps {
    * @return lazy browser step
    */
   public static RunnableStep switchToWindowByTitle(final String title) {
-    return new RunnableStep.Of("Switch browser window by title", params("title", title), () ->
+    return new RunnableStep.Of("Switch browser window by title", params("title", secret(title)), () ->
       switchToMatchingWindow(driver -> Objects.equals(driver.getTitle(), title), "title", title)
     );
   }
@@ -130,7 +131,7 @@ public final class SelenideSteps {
       throw ex;
     }
     final NoSuchElementException notFound = new NoSuchElementException(
-      "No browser window with " + selectorName + ": " + selectorValue
+      "No browser window matched the requested " + selectorName
     );
     restoreWindow(driver, originalHandle, notFound);
     throw notFound;

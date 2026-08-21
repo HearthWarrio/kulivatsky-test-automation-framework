@@ -2,36 +2,39 @@
 setlocal
 set "BASE_DIR=%~dp0"
 set "PROPS=%BASE_DIR%.mvn\wrapper\maven-wrapper.properties"
+set "BOOTSTRAP=%BASE_DIR%.mvn\wrapper\MavenBootstrap.java"
 
-for /F "usebackq tokens=1,* delims==" %%A in ("%PROPS%") do (
-  if "%%A"=="mavenVersion" set "MAVEN_VERSION=%%B"
-  if "%%A"=="distributionUrl" set "DIST_URL=%%B"
-  if "%%A"=="distributionSha512Sum" set "DIST_SHA512=%%B"
+if defined JAVA_HOME (
+  set "JAVA_EXE=%JAVA_HOME%\bin\java.exe"
+) else (
+  set "JAVA_EXE=java"
 )
 
-for %%I in ("%DIST_URL%") do set "DIST_FILE=%%~nxI"
+"%JAVA_EXE%" -version >nul 2>&1
+if errorlevel 1 (
+  echo Error: Java 21 or newer is required to run the Maven wrapper. 1>&2
+  exit /b 1
+)
+
 if defined MAVEN_USER_HOME (
   set "CACHE_ROOT=%MAVEN_USER_HOME%\wrapper\dists\ktaf"
 ) else (
   set "CACHE_ROOT=%USERPROFILE%\.m2\wrapper\dists\ktaf"
 )
-set "MAVEN_HOME=%CACHE_ROOT%\apache-maven-%MAVEN_VERSION%"
-set "ARCHIVE=%CACHE_ROOT%\%DIST_FILE%"
 
-if exist "%MAVEN_HOME%\bin\mvn.cmd" goto runMaven
+set "BOOTSTRAP_OUT=%TEMP%\ktaf-mvnw-%RANDOM%-%RANDOM%.txt"
+"%JAVA_EXE%" "%BOOTSTRAP%" "%PROPS%" "%CACHE_ROOT%" > "%BOOTSTRAP_OUT%"
+if errorlevel 1 (
+  del /q "%BOOTSTRAP_OUT%" >nul 2>&1
+  exit /b 1
+)
+set /p "MAVEN_HOME="<"%BOOTSTRAP_OUT%"
+del /q "%BOOTSTRAP_OUT%" >nul 2>&1
 
-if not exist "%CACHE_ROOT%" mkdir "%CACHE_ROOT%"
-set "TEMP_ARCHIVE=%ARCHIVE%.tmp"
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$ErrorActionPreference='Stop';" ^
-  "Invoke-WebRequest -UseBasicParsing -Uri '%DIST_URL%' -OutFile '%TEMP_ARCHIVE%';" ^
-  "$hash=(Get-FileHash -Algorithm SHA512 '%TEMP_ARCHIVE%').Hash.ToLowerInvariant();" ^
-  "if ($hash -ne '%DIST_SHA512%') { throw 'Maven distribution checksum mismatch.' };" ^
-  "if (Test-Path '%MAVEN_HOME%') { Remove-Item -Recurse -Force '%MAVEN_HOME%' };" ^
-  "Expand-Archive -Force '%TEMP_ARCHIVE%' '%CACHE_ROOT%';" ^
-  "Move-Item -Force '%TEMP_ARCHIVE%' '%ARCHIVE%'"
-if errorlevel 1 exit /b %errorlevel%
+if not defined MAVEN_HOME (
+  echo Error: Maven bootstrap did not return an installation directory. 1>&2
+  exit /b 1
+)
 
-:runMaven
 call "%MAVEN_HOME%\bin\mvn.cmd" %*
 exit /b %errorlevel%

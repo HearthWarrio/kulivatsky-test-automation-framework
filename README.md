@@ -53,12 +53,12 @@ The default build excludes the `ui` and `container` groups. This keeps an ordina
 
 ## Build
 
-Requirement: JDK 21. Maven itself does not need to be installed globally: the repository-local launchers download the pinned Maven distribution and verify its SHA-512 checksum before first use.
+Requirement: JDK 21. Maven itself does not need to be installed globally: both repository-local launchers use the JDK-only bootstrap under `.mvn/wrapper` to download the pinned Maven distribution, verify its SHA-512 checksum, and extract it. The bootstrap has no `curl`, `wget`, checksum-utility, `unzip`, or PowerShell dependency.
 
 Linux/macOS:
 
 ```bash
-./mvnw clean verify
+sh ./mvnw clean verify
 ```
 
 Windows PowerShell:
@@ -70,31 +70,31 @@ Windows PowerShell:
 Run the real PostgreSQL + Kafka example. Docker must be available:
 
 ```bash
-./mvnw test -Pintegration -Dgroups=container
+sh ./mvnw test -Pintegration -Dgroups=container
 ```
 
 Run the headless UI example:
 
 ```bash
-./mvnw test -Pui -Dgroups=ui -Dselenide.headless=true
+sh ./mvnw test -Pui -Dgroups=ui -Dselenide.headless=true
 ```
 
 Run every demo scenario:
 
 ```bash
-./mvnw test -Pfull
+sh ./mvnw test -Pfull
 ```
 
 Build the reusable binary, source, and Javadoc JARs:
 
 ```bash
-./mvnw clean package -DskipTests
+sh ./mvnw clean package -DskipTests
 ```
 
 Install the library into the local Maven repository:
 
 ```bash
-./mvnw clean install -DskipTests
+sh ./mvnw clean install -DskipTests
 ```
 
 ## Configuration
@@ -126,12 +126,15 @@ api.orders_api.test.url=https://example.invalid
 web.storefront.test.url=https://example.invalid
 db.orders_database.test.url=jdbc:postgresql://example.invalid/orders
 kafka.events.test.bootstrapServers=example.invalid:9092
+kafka.events.test.enableAutoCommit=false
 ```
+
+Short-lived `Kafka.poll(...)` operations always disable offset auto-commit, even if a direct consumer is configured differently, so filtering past unrelated records cannot advance a shared group.
 
 Runtime overrides can be supplied without changing files:
 
 ```bash
-./mvnw test -Dautotests.env=TEST -Drest.timeoutMs=20000
+sh ./mvnw test -Dautotests.env=TEST -Drest.timeoutMs=20000
 ```
 
 ## Extensible project and service identifiers
@@ -172,7 +175,7 @@ The same class may be registered as a listener in `testng.xml`. It should not be
 
 ## Step DSL
 
-The framework keeps ordinary Java control flow visible while giving reusable operations stable Allure step names:
+The framework keeps ordinary Java control flow visible while giving reusable operations stable Allure step names. Step reporting is implemented by the framework DSL itself, so consuming projects do not need an AspectJ Java agent merely to use KTAF page objects or steps:
 
 ```java
 stepContext()
@@ -208,6 +211,7 @@ Text diagnostics are treated as report data, not as an unrestricted log dump.
 - an unusual parameter name can be marked explicitly with `Params.secret(value)`
 - text attachments are capped by `report.attachment.maxChars` (20,000 by default)
 - automatic REST request/response body attachment is intentionally disabled
+- automatic Selenide event steps are intentionally disabled; UI reporting goes through KTAF steps instead of an unmasked second reporting path
 - browser screenshots and page source are opt-in because screenshots cannot be redacted and DOM content may contain business data
 - binary attachments use a separate API because text redaction cannot safely inspect arbitrary bytes
 
@@ -235,7 +239,7 @@ report.browser.url.enabled=true
 The project is deliberately below `1.0.0` while its public API is still allowed to evolve. After the first baseline artifact has been published or installed, compatibility with that version can be checked with the opt-in `api-compat` profile:
 
 ```bash
-./mvnw verify -Dcompat.version=0.1.0
+sh ./mvnw verify -Dcompat.version=0.1.0
 ```
 
 Normal builds do not attempt to resolve a historical baseline.

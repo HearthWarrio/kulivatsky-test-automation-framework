@@ -52,7 +52,8 @@ public final class AwaitilityUtils {
     } catch (final RuntimeException | AssertionError ex) {
       try {
         AllureUtils.attachText("Last observed value", lastValue.get());
-      } catch (final RuntimeException reportingFailure) {
+      } catch (final Throwable reportingFailure) {
+        ExceptionUtils.rethrowIfFatal(reportingFailure);
         ex.addSuppressed(reportingFailure);
       }
       throw ex;

@@ -3,7 +3,6 @@ package org.kulivatsky.autotests.core.web;
 import com.codeborne.selenide.ElementsCollection;
 import com.codeborne.selenide.SelenideElement;
 import com.codeborne.selenide.WebDriverRunner;
-import io.qameta.allure.Step;
 import org.kulivatsky.autotests.core.annotation.Page;
 
 import java.time.Duration;
@@ -12,15 +11,17 @@ import java.util.Objects;
 
 import static com.codeborne.selenide.Condition.enabled;
 import static com.codeborne.selenide.Condition.visible;
+import static com.codeborne.selenide.Selenide.$$x;
 import static com.codeborne.selenide.Selenide.$x;
+import static org.kulivatsky.autotests.core.step.Steps.step;
 
 /**
  * Base class for Selenide page objects with optional page-open verification.
  *
- * <p>Text lookup uses an escaped XPath literal and selects the deepest visible element containing
- * the requested text. This avoids two common failures of raw string interpolation: apostrophes in
- * user-facing text breaking the XPath, and broad ancestor elements such as {@code body} matching
- * merely because a descendant contains the same text.</p>
+ * <p>Text lookup normalizes caller whitespace, escapes the value as an XPath literal, considers
+ * elements with a matching direct text node, and then selects the first visible match. Restricting
+ * the XPath to direct text nodes avoids broad ancestors such as {@code body}; applying Selenide's
+ * visibility filter prevents a hidden matching child from masking a visible sibling or parent.</p>
  */
 public abstract class BasePage {
   /** Maximum wait for constructor-time page markers. */
@@ -38,7 +39,11 @@ public abstract class BasePage {
       return;
     }
     if (!page.title().isBlank()) {
-      textElement(page.title()).shouldBe(visible, DEFAULT_TIMEOUT);
+      try {
+        textElement(page.title()).shouldBe(visible, DEFAULT_TIMEOUT);
+      } catch (final RuntimeException | AssertionError ex) {
+        throw new IllegalStateException("Page title marker is not visible");
+      }
     }
     if (!page.xPath().isBlank()) {
       $x(page.xPath()).shouldBe(visible, DEFAULT_TIMEOUT);
@@ -46,14 +51,16 @@ public abstract class BasePage {
   }
 
   /**
-   * Checks whether the deepest element containing the supplied text is currently visible.
+   * Checks whether an element containing the supplied text is currently visible.
+   *
+   * <p>The searched text is deliberately not copied into the report step name or parameters because
+   * arbitrary page text may contain identifiers or other report-sensitive data.</p>
    *
    * @param label text fragment to search for
    * @return {@code true} when a matching element is visible
    */
-  @Step("Text '{label}' is visible")
   public boolean isLabelVisible(final String label) {
-    return textElement(label).is(visible);
+    return step("Check text visibility", () -> textElement(label).is(visible));
   }
 
   /**
@@ -63,25 +70,28 @@ public abstract class BasePage {
    * @param duration maximum condition-check duration
    * @return {@code true} when a matching element is visible within the duration
    */
-  @Step("Text '{label}' is visible")
   public boolean isLabelVisible(final String label, final Duration duration) {
-    return textElement(label).is(visible, duration);
+    return step("Check text visibility with timeout", () -> textElement(label).is(visible, duration));
   }
 
   /**
-   * Waits for visible text and clicks the deepest matching element.
+   * Waits for visible text and clicks the first visible matching element.
    *
    * @param text text fragment used to locate the element
    */
-  @Step("Click text '{text}'")
   public void clickByText(final String text) {
-    textElement(text).shouldBe(visible).click();
+    step("Click element by visible text", () -> {
+      try {
+        textElement(text).shouldBe(visible).click();
+      } catch (final RuntimeException | AssertionError ex) {
+        throw new AssertionError("No visible element matched the requested text");
+      }
+    });
   }
 
   /** @return current browser URL as reported by Selenium */
-  @Step("Read current URL")
   public String getUrl() {
-    return WebDriverRunner.getWebDriver().getCurrentUrl();
+    return step("Read current URL", () -> WebDriverRunner.getWebDriver().getCurrentUrl());
   }
 
   /**
@@ -105,22 +115,27 @@ public abstract class BasePage {
   }
 
   /**
-   * Builds a locator for the deepest element whose normalized descendant text contains a fragment.
+   * Builds a locator for the first visible element with a direct text node containing a fragment.
    *
-   * @param text non-blank text fragment
-   * @return lazy Selenide element
+   * @param text non-blank text fragment; repeated whitespace is collapsed before lookup
+   * @return lazy Selenide element resolved from the matching visible collection
    * @throws NullPointerException when {@code text} is null
    * @throws IllegalArgumentException when {@code text} is blank
    */
   private static SelenideElement textElement(final String text) {
+    final String normalizedText = normalizeText(text);
+    final String literal = xpathLiteral(normalizedText);
+    final String xpath = "//*[text()[contains(normalize-space(.), %s)]]".formatted(literal);
+    return $$x(xpath).findBy(visible);
+  }
+
+  /** Normalizes caller text in the same way XPath {@code normalize-space()} normalizes text nodes. */
+  private static String normalizeText(final String text) {
     final String checkedText = Objects.requireNonNull(text, "text");
     if (checkedText.isBlank()) {
       throw new IllegalArgumentException("text must not be blank");
     }
-    final String literal = xpathLiteral(checkedText);
-    final String xpath = "//*[contains(normalize-space(.), %1$s) and not(.//*[contains(normalize-space(.), %1$s)])]"
-      .formatted(literal);
-    return $x(xpath);
+    return checkedText.trim().replaceAll("\\s+", " ");
   }
 
   /**

@@ -1,5 +1,6 @@
-# CRLF is allowed in normal source/config files, but Maven launchers are platform-pinned.
+# CRLF is allowed in normal source/config files; wrapper launchers are platform-pinned.
 * whitespace=cr-at-eol,trailing-space
 mvnw text eol=lf
 .mvn/wrapper/maven-wrapper.properties text eol=lf
+.mvn/wrapper/MavenBootstrap.java text eol=lf
 mvnw.cmd text eol=crlf

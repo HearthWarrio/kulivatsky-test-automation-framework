@@ -111,9 +111,9 @@ public final class Steps {
   /**
    * Runs one action inside a best-effort Allure step lifecycle.
    *
-   * <p>Reporting is deliberately subordinate to test execution. A failure while creating,
-   * updating, redacting, or stopping an Allure step is logged but never replaces the action result
-   * or the action's original exception. Fatal {@link VirtualMachineError}s are rethrown
+   * <p>Reporting is deliberately subordinate to test execution. Ordinary reporting failures,
+   * including assertion/linkage errors from the reporting stack, are logged but never replace the
+   * action result or the action's original exception. JVM- and thread-fatal errors are not swallowed. Fatal {@link VirtualMachineError}s thrown by the action itself are rethrown
    * immediately without allocating stack-trace/reporting structures.</p>
    *
    * @param name report step name
@@ -137,7 +137,7 @@ public final class Steps {
       }
       return result;
     } catch (final Throwable ex) {
-      fatalFailure = ex instanceof VirtualMachineError;
+      fatalFailure = ExceptionUtils.isFatal(ex);
       if (!fatalFailure && started) {
         final Status status = ex instanceof AssertionError ? Status.FAILED : Status.BROKEN;
         updateStatus(lifecycle, uuid, status, ex);
@@ -154,7 +154,8 @@ public final class Steps {
   private static AllureLifecycle lifecycle() {
     try {
       return Allure.getLifecycle();
-    } catch (final RuntimeException ex) {
+    } catch (final Throwable ex) {
+      ExceptionUtils.rethrowIfFatal(ex);
       LOGGER.warn("Unable to obtain Allure lifecycle; executing step without reporting", ex);
       return null;
     }
@@ -175,7 +176,8 @@ public final class Steps {
       );
       lifecycle.startStep(uuid, stepResult);
       return true;
-    } catch (final RuntimeException ex) {
+    } catch (final Throwable ex) {
+      ExceptionUtils.rethrowIfFatal(ex);
       LOGGER.warn("Unable to start Allure step '{}'", name, ex);
       return false;
     }
@@ -201,7 +203,8 @@ public final class Steps {
           step.setStatusDetails(details);
         }
       });
-    } catch (final RuntimeException ex) {
+    } catch (final Throwable ex) {
+      ExceptionUtils.rethrowIfFatal(ex);
       LOGGER.warn("Unable to update Allure step {}", uuid, ex);
     }
   }
@@ -210,9 +213,11 @@ public final class Steps {
   private static void stopStep(final AllureLifecycle lifecycle, final String uuid) {
     try {
       lifecycle.stopStep(uuid);
-    } catch (final RuntimeException ex) {
+    } catch (final Throwable ex) {
+      ExceptionUtils.rethrowIfFatal(ex);
       LOGGER.warn("Unable to stop Allure step {}", uuid, ex);
     }
   }
+
 
 }

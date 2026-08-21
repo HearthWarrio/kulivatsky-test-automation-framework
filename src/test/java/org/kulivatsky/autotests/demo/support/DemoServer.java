@@ -114,7 +114,14 @@ public final class DemoServer implements AutoCloseable {
       return;
     }
     if ("GET".equals(method) && path.matches("/api/orders/\\d+")) {
-      final long id = Long.parseLong(path.substring(path.lastIndexOf('/') + 1));
+      final String rawId = path.substring(path.lastIndexOf('/') + 1);
+      final long id;
+      try {
+        id = Long.parseLong(rawId);
+      } catch (final NumberFormatException ex) {
+        json(exchange, 400, "{\"message\":\"Order id is out of range\"}");
+        return;
+      }
       final String status = this.orderStatuses.get(id);
       if (status == null) {
         json(exchange, 404, "{\"message\":\"Order not found\"}");

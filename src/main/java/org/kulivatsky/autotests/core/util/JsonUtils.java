@@ -92,7 +92,7 @@ public final class JsonUtils {
    * @throws IllegalStateException when the resource cannot be read or parsed
    */
   public static JsonNode readResource(final String resourcePath) {
-    try (InputStream input = JsonUtils.class.getClassLoader().getResourceAsStream(resourcePath)) {
+    try (InputStream input = resourceStream(resourcePath)) {
       if (input == null) {
         throw new IllegalArgumentException("Classpath resource not found: " + resourcePath);
       }
@@ -100,5 +100,18 @@ public final class JsonUtils {
     } catch (final IOException ex) {
       throw new IllegalStateException("Unable to read JSON resource: " + resourcePath, ex);
     }
+  }
+
+  /** Resolves a resource from the consuming thread's class loader before the framework class loader. */
+  private static InputStream resourceStream(final String resourcePath) {
+    final ClassLoader contextLoader = Thread.currentThread().getContextClassLoader();
+    if (contextLoader != null) {
+      final InputStream input = contextLoader.getResourceAsStream(resourcePath);
+      if (input != null) {
+        return input;
+      }
+    }
+    final ClassLoader frameworkLoader = JsonUtils.class.getClassLoader();
+    return frameworkLoader == contextLoader ? null : frameworkLoader.getResourceAsStream(resourcePath);
   }
 }

@@ -118,6 +118,10 @@ public final class KafkaStorage {
   /**
    * Builds properties required by a string-key/string-value Kafka consumer.
    *
+   * <p>Offset auto-commit is disabled by default. Direct consumers may opt in with
+   * {@code kafka.<service>.<env>.enableAutoCommit=true}; the short-lived {@link Kafka#poll} facade
+   * still forces auto-commit off so discarded non-matching records cannot advance a shared group.</p>
+   *
    * @param service logical Kafka service
    * @param env target environment
    * @return fresh consumer properties
@@ -128,6 +132,10 @@ public final class KafkaStorage {
     final Properties properties = commonProperties(config, prefix);
     properties.put(ConsumerConfig.GROUP_ID_CONFIG, config.property(prefix + ".groupId", "autotests"));
     properties.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, config.property(prefix + ".autoOffsetReset", "earliest"));
+    properties.put(
+      ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG,
+      Boolean.toString(config.booleanProperty(prefix + ".enableAutoCommit", false))
+    );
     properties.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
     properties.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
     return properties;

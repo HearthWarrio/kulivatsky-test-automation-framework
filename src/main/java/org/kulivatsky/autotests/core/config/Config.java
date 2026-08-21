@@ -2,6 +2,8 @@ package org.kulivatsky.autotests.core.config;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
@@ -180,14 +182,24 @@ public final class Config {
     return withCamelCaseSeparated.replaceAll("[^A-Za-z0-9]", "_").toUpperCase(Locale.ROOT);
   }
 
-  /** Resolves a raw value from all supported sources without trimming it. */
+  /**
+   * Resolves the first non-blank value from the configured sources.
+   *
+   * <p>A blank value in a higher-priority source does not hide a usable lower-priority value. This
+   * keeps the documented precedence about meaningful configuration values rather than mere key
+   * presence.</p>
+   */
   private String resolvedValue(final String key) {
     final String systemValue = System.getProperty(key);
-    if (systemValue != null) {
+    if (systemValue != null && !systemValue.isBlank()) {
       return systemValue;
     }
     final String environmentValue = System.getenv(environmentKey(key));
-    return environmentValue != null ? environmentValue : this.properties.getProperty(key);
+    if (environmentValue != null && !environmentValue.isBlank()) {
+      return environmentValue;
+    }
+    final String propertyValue = this.properties.getProperty(key);
+    return propertyValue != null && !propertyValue.isBlank() ? propertyValue : null;
   }
 
   /** Resolves one case-insensitive enum property. */
@@ -225,16 +237,35 @@ public final class Config {
       .toList();
   }
 
-  /** Loads framework defaults from the classpath. */
+  /**
+   * Loads framework defaults from the classpath as UTF-8 text.
+   *
+   * <p>The thread context class loader is tried first so consuming projects can supply their own
+   * {@code autotests.properties} even when the framework itself is loaded by a parent or isolated
+   * class loader. The framework class loader is used as a fallback.</p>
+   */
   private static Properties loadProperties() {
     final Properties loaded = new Properties();
-    try (InputStream stream = Config.class.getClassLoader().getResourceAsStream(RESOURCE)) {
+    try (InputStream stream = resourceStream(RESOURCE)) {
       if (stream != null) {
-        loaded.load(stream);
+        loaded.load(new InputStreamReader(stream, StandardCharsets.UTF_8));
       }
       return loaded;
     } catch (final IOException ex) {
       throw new IllegalStateException("Unable to read configuration resource: " + RESOURCE, ex);
     }
+  }
+
+  /** Resolves a classpath resource from the consumer context first and the framework loader second. */
+  private static InputStream resourceStream(final String resourcePath) {
+    final ClassLoader contextLoader = Thread.currentThread().getContextClassLoader();
+    if (contextLoader != null) {
+      final InputStream stream = contextLoader.getResourceAsStream(resourcePath);
+      if (stream != null) {
+        return stream;
+      }
+    }
+    final ClassLoader frameworkLoader = Config.class.getClassLoader();
+    return frameworkLoader == contextLoader ? null : frameworkLoader.getResourceAsStream(resourcePath);
   }
 }

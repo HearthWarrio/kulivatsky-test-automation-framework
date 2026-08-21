@@ -18,15 +18,27 @@ public final class AllureUtils {
   );
   /** Quoted JSON/property-style secret values, including values that contain spaces. */
   private static final Pattern QUOTED_NAMED_SECRET = Pattern.compile(
-    "(?i)(\\\"?(?:password|passwd|pwd|secret|token|access_token|refresh_token|api[_-]?key|authorization|cookie|session[_-]?id)\\\"?\\s*[:=]\\s*)([\\\"'])([^\\r\\n]*?)(\\2|$)"
+    "(?i)(\\\"?(?:password|passwd|pwd|secret|client[_-]?secret|token|access_token|refresh_token|api[_-]?key|authorization|cookie|session[_-]?id)\\\"?\\s*[:=]\\s*)([\\\"'])([^\\r\\n]*?)(\\2|$)"
   );
   /** Unquoted JSON/property-style secret values. */
   private static final Pattern BARE_NAMED_SECRET = Pattern.compile(
-    "(?i)(\\b(?:password|passwd|pwd|secret|token|access_token|refresh_token|api[_-]?key|authorization|cookie|session[_-]?id)\\b\\s*[:=]\\s*)([^\\s,};&\"']+)"
+    "(?i)(\\b(?:password|passwd|pwd|secret|client[_-]?secret|token|access_token|refresh_token|api[_-]?key|authorization|cookie|session[_-]?id)\\b\\s*[:=]\\s*)([^\\s,};&\"']+)"
   );
   /** Secret-like URL query parameters. */
   private static final Pattern QUERY_SECRET = Pattern.compile(
-    "(?i)([?&](?:password|secret|token|access_token|refresh_token|api[_-]?key|session[_-]?id)=)([^&#\\s]+)"
+    "(?i)([?&](?:password|secret|client[_-]?secret|token|access_token|refresh_token|api[_-]?key|session[_-]?id)=)([^&#\\s]+)"
+  );
+  /** Assertion messages that name a sensitive field before showing expected and actual values. */
+  private static final Pattern SENSITIVE_ASSERTION_VALUES = Pattern.compile(
+    "(?i)(\\b(?:password|passwd|pwd|secret|client[_-]?secret|token|access_token|refresh_token|api[_-]?key|authorization|cookie|session[_-]?id)\\b[^\\r\\n]{0,160}?\\bexpected\\s*[:=]\\s*)((?:(?:bearer|basic)\\s+)?[^\\s,;]+)([^\\r\\n]{0,96}?\\bactual\\s*[:=]\\s*)((?:(?:bearer|basic)\\s+)?[^\\s,;]+)"
+  );
+  /** Credentials embedded in URL user-info, for example {@code https://user:password@host}. */
+  private static final Pattern URL_USER_INFO_SECRET = Pattern.compile(
+    "(?i)(\\b[a-z][a-z0-9+.-]*://)([^\\s/@:]+):([^\\s/@]+)@"
+  );
+  /** Standalone Authorization-scheme credentials that may appear outside a named header. */
+  private static final Pattern AUTH_SCHEME_SECRET = Pattern.compile(
+    "(?i)(\\b(?:bearer|basic)\\s+)([^\\s,;]+)"
   );
 
   /** No instances. */
@@ -46,11 +58,20 @@ public final class AllureUtils {
   /**
    * Attaches already serialized JSON after redaction and size limiting.
    *
+   * <p>When the report-size limit truncates the document, the attachment is deliberately emitted as
+   * plain text rather than mislabeled as valid JSON.</p>
+   *
    * @param name attachment name shown in Allure
    * @param json JSON text to attach
    */
   public static void attachJson(final String name, final String json) {
-    attachUtf8(name, "application/json", "json", json);
+    final String source = String.valueOf(json);
+    final String safe = safeAttachmentText(source);
+    if (requiresTruncation(source)) {
+      attachBytes(name, "text/plain", "txt", safe.getBytes(StandardCharsets.UTF_8));
+      return;
+    }
+    attachBytes(name, "application/json", "json", safe.getBytes(StandardCharsets.UTF_8));
   }
 
   /**
@@ -92,12 +113,12 @@ public final class AllureUtils {
   }
 
   /**
-   * Redacts common credential, token, cookie, and session-id representations from arbitrary text.
+   * Redacts common credential, token, cookie, URL-user-info, and session-id representations.
    *
    * <p>Masking is enabled by default and can be disabled only with
-   * {@code report.masking.enabled=false}. The method is intentionally conservative: it recognizes
-   * common header, property/JSON, and URL-query forms, but callers should still avoid attaching
-   * unnecessary payloads.</p>
+   * {@code report.masking.enabled=false}. The recognizers intentionally cover both named values and
+   * common standalone {@code Bearer}/{@code Basic} credentials, but callers should still avoid
+   * attaching data that the report does not need.</p>
    *
    * @param text text that may contain secrets
    * @return redacted text, or {@code null} when the input is null
@@ -107,9 +128,18 @@ public final class AllureUtils {
       return text;
     }
     String result = HEADER_SECRET.matcher(text).replaceAll("$1$2" + MASK);
+    result = SENSITIVE_ASSERTION_VALUES.matcher(result).replaceAll("$1" + MASK + "$3" + MASK);
     result = QUOTED_NAMED_SECRET.matcher(result).replaceAll("$1$2" + MASK + "$4");
     result = BARE_NAMED_SECRET.matcher(result).replaceAll("$1" + MASK);
-    return QUERY_SECRET.matcher(result).replaceAll("$1" + MASK);
+    result = QUERY_SECRET.matcher(result).replaceAll("$1" + MASK);
+    result = URL_USER_INFO_SECRET.matcher(result).replaceAll("$1***:***@");
+    return AUTH_SCHEME_SECRET.matcher(result).replaceAll("$1" + MASK);
+  }
+
+  /** Returns whether the configured report limit requires the supplied text to be truncated. */
+  private static boolean requiresTruncation(final String text) {
+    final int limit = Config.current().intProperty("report.attachment.maxChars", 20_000);
+    return limit > 0 && text.length() > limit;
   }
 
   /**

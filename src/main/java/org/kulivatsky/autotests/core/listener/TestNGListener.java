@@ -2,8 +2,6 @@ package org.kulivatsky.autotests.core.listener;
 
 import com.codeborne.selenide.Selenide;
 import com.codeborne.selenide.WebDriverRunner;
-import com.codeborne.selenide.logevents.SelenideLogger;
-import io.qameta.allure.selenide.AllureSelenide;
 import io.restassured.RestAssured;
 import io.restassured.config.RestAssuredConfig;
 import org.kulivatsky.autotests.core.annotation.Disabled;
@@ -14,6 +12,7 @@ import org.kulivatsky.autotests.core.config.Service;
 import org.kulivatsky.autotests.core.storage.DBConnectionPoolStorage;
 import org.kulivatsky.autotests.core.storage.RestAssuredConfigStorage;
 import org.kulivatsky.autotests.core.util.AllureUtils;
+import org.kulivatsky.autotests.core.util.ExceptionUtils;
 import org.openqa.selenium.OutputType;
 import org.openqa.selenium.TakesScreenshot;
 import org.openqa.selenium.WebDriver;
@@ -32,7 +31,6 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.NoSuchElementException;
-import java.util.UUID;
 
 /**
  * Opt-in TestNG integration for launch filtering, framework lifecycle, and browser diagnostics.
@@ -44,24 +42,29 @@ import java.util.UUID;
  * TestNG processes test annotations. Merely adding the framework JAR to a classpath therefore does
  * not mutate REST Assured or Selenide global state.</p>
  *
- * <p>Raw REST request/response bodies are not attached automatically. This is deliberate: generic
- * transport filters cannot know which customer fields are safe to publish in a report. Framework
- * steps and explicit attachments remain available and are masked by the reporting layer.</p>
+ * <p>Multiple TestNG executions in one JVM share one reference-counted framework lifecycle. The
+ * first active execution installs KTAF's REST Assured global configuration, and the last active
+ * execution restores it and closes framework-owned database pools. One execution therefore cannot
+ * restore or close process-wide state while another KTAF execution is still active.</p>
  */
 public final class TestNGListener implements IExecutionListener, IInvokedMethodListener, IAnnotationTransformer {
   /** Logger used for lifecycle messages and non-fatal diagnostic failures. */
   private static final Logger LOGGER = LoggerFactory.getLogger(TestNGListener.class);
-  /** Unique Selenide listener key owned by this listener instance. */
-  private final String selenideListenerName = TestNGListener.class.getName() + ".allure." + UUID.randomUUID();
+  /** Lock protecting process-wide REST Assured and database-pool ownership. */
+  private static final Object GLOBAL_STATE_LOCK = new Object();
   /** Test result associated with the thread currently executing a TestNG test method. */
   private static final ThreadLocal<ITestResult> CURRENT_TEST = new ThreadLocal<>();
+  /** Number of TestNG executions currently using the shared KTAF lifecycle. */
+  private static int activeExecutions;
+  /** REST Assured configuration that existed before the first active KTAF execution. */
+  private static RestAssuredConfig previousRestAssuredConfig;
+  /** Whether the shared REST Assured configuration is currently installed. */
+  private static boolean globalStateInstalled;
 
-  /** REST Assured configuration that was active before this listener changed global defaults. */
-  private RestAssuredConfig previousRestAssuredConfig;
-  /** Whether this listener has taken ownership of the current REST Assured configuration. */
-  private boolean restAssuredConfigured;
   /** Whether the default Selenide driver should be closed after each test method. */
   private boolean closeBrowserAfterTest = true;
+  /** Guards this listener instance from incrementing/decrementing the global lifecycle twice. */
+  private boolean executionRegistered;
 
   /**
    * Returns the TestNG result bound to the current thread.
@@ -78,58 +81,48 @@ public final class TestNGListener implements IExecutionListener, IInvokedMethodL
   }
 
   /**
-   * Applies framework REST Assured defaults and registers Selenide's Allure event listener.
+   * Registers this TestNG execution with the shared framework lifecycle.
    *
-   * <p>Request/response console logging on validation failure is disabled by default because it can
-   * expose credentials or payload data in CI logs. Set {@code rest.logOnValidationFailure=true}
-   * only in an environment where such output is acceptable.</p>
+   * <p>Request/response validation-failure logging is disabled by default because it can expose
+   * credentials or payload data in CI logs. When explicitly enabled, it is part of the REST Assured
+   * configuration installed by {@code RestAssuredConfigStorage}, so the complete previous config is
+   * restored when the last KTAF execution finishes.</p>
    */
   @Override
   public void onExecutionStart() {
-    final Config config = Config.current();
-    final boolean logOnValidationFailure = config.booleanProperty("rest.logOnValidationFailure", false);
-    this.closeBrowserAfterTest = config.booleanProperty("browser.closeAfterTest", true);
-    this.previousRestAssuredConfig = RestAssured.config;
-    try {
-      RestAssured.config = RestAssuredConfigStorage.config();
-      this.restAssuredConfigured = true;
-      if (logOnValidationFailure) {
-        RestAssured.enableLoggingOfRequestAndResponseIfValidationFails();
+    this.closeBrowserAfterTest = Config.current().booleanProperty("browser.closeAfterTest", true);
+    synchronized (GLOBAL_STATE_LOCK) {
+      if (this.executionRegistered) {
+        return;
       }
-      SelenideLogger.addListener(
-        this.selenideListenerName,
-        new AllureSelenide().screenshots(false).savePageSource(false)
-      );
-    } catch (final RuntimeException ex) {
-      try {
-        SelenideLogger.removeListener(this.selenideListenerName);
-      } catch (final RuntimeException cleanupException) {
-        ex.addSuppressed(cleanupException);
+      if (activeExecutions == 0) {
+        installGlobalState();
       }
-      restoreRestAssuredConfig();
-      throw ex;
+      activeExecutions++;
+      this.executionRegistered = true;
     }
   }
 
   /**
-   * Releases framework-owned resources and restores REST Assured global state after the execution.
+   * Releases this execution's reference to framework-owned process-wide state.
    *
-   * <p>Cleanup is best-effort. Failure to remove a report listener or restore a global default is
-   * logged rather than allowed to replace the test execution result.</p>
+   * <p>Only the last active KTAF execution closes shared database pools and restores REST Assured
+   * configuration. Cleanup is best-effort and does not replace
+   * test results with ordinary cleanup failures.</p>
    */
   @Override
   public void onExecutionFinish() {
-    try {
-      DBConnectionPoolStorage.closeAll();
-    } catch (final RuntimeException ex) {
-      LOGGER.warn("Unable to close KTAF database pools", ex);
-    }
-    try {
-      SelenideLogger.removeListener(this.selenideListenerName);
-    } catch (final RuntimeException ex) {
-      LOGGER.warn("Unable to remove KTAF Selenide listener", ex);
-    } finally {
-      restoreRestAssuredConfig();
+    synchronized (GLOBAL_STATE_LOCK) {
+      if (!this.executionRegistered) {
+        return;
+      }
+      this.executionRegistered = false;
+      if (activeExecutions > 0) {
+        activeExecutions--;
+      }
+      if (activeExecutions == 0) {
+        releaseGlobalState();
+      }
     }
   }
 
@@ -150,12 +143,13 @@ public final class TestNGListener implements IExecutionListener, IInvokedMethodL
     if (testMethod == null) {
       return;
     }
+    final TestInfo info = testMethod.getAnnotation(TestInfo.class);
+    final List<String> testProjects = info == null ? List.of() : normalizeIds(info.project());
+    final List<String> testServices = info == null ? List.of() : normalizeIds(info.service());
     if (testMethod.isAnnotationPresent(Disabled.class)) {
       annotation.setEnabled(false);
       return;
     }
-
-    final TestInfo info = testMethod.getAnnotation(TestInfo.class);
     if (info == null) {
       return;
     }
@@ -175,8 +169,8 @@ public final class TestNGListener implements IExecutionListener, IInvokedMethodL
     if (!matchesSelection(info.testType(), config.testType())
       || !matchesSelection(info.testSubject(), config.testSubject())
       || !matchesSelection(info.testLevel(), config.testLevel())
-      || !matchesIds(info.project(), config.project().stream().map(Project::id).toList())
-      || !matchesIds(info.service(), config.service().stream().map(Service::id).toList())) {
+      || !matchesIds(testProjects, config.project().stream().map(Project::id).toList())
+      || !matchesIds(testServices, config.service().stream().map(Service::id).toList())) {
       annotation.setEnabled(false);
     }
   }
@@ -210,11 +204,10 @@ public final class TestNGListener implements IExecutionListener, IInvokedMethodL
         attachBrowserState();
       }
       if (this.closeBrowserAfterTest && WebDriverRunner.hasWebDriverStarted()) {
-        try {
-          Selenide.closeWebDriver();
-        } catch (final RuntimeException ex) {
-          LOGGER.warn("Unable to close Selenide WebDriver after test {}", testResult.getName(), ex);
-        }
+        cleanup(
+          "Unable to close Selenide WebDriver after test " + testResult.getName(),
+          Selenide::closeWebDriver
+        );
       }
     } finally {
       CURRENT_TEST.remove();
@@ -256,23 +249,48 @@ public final class TestNGListener implements IExecutionListener, IInvokedMethodL
       if (config.booleanProperty("report.browser.url.enabled", false)) {
         AllureUtils.attachText("Current URL", driver.getCurrentUrl());
       }
-    } catch (final RuntimeException ex) {
+    } catch (final Throwable ex) {
+      ExceptionUtils.rethrowIfFatal(ex);
       LOGGER.warn("Unable to attach browser diagnostics", ex);
     }
   }
 
-  /** Restores the REST Assured configuration captured at execution start. */
-  private void restoreRestAssuredConfig() {
-    if (!this.restAssuredConfigured && this.previousRestAssuredConfig == null) {
-      return;
-    }
+  /** Installs the one process-wide REST Assured state owned by active KTAF executions. */
+  private static void installGlobalState() {
+    previousRestAssuredConfig = RestAssured.config;
     try {
-      RestAssured.config = this.previousRestAssuredConfig;
-    } catch (final RuntimeException ex) {
-      LOGGER.warn("Unable to restore REST Assured configuration", ex);
-    } finally {
-      this.previousRestAssuredConfig = null;
-      this.restAssuredConfigured = false;
+      RestAssured.config = RestAssuredConfigStorage.config();
+      globalStateInstalled = true;
+    } catch (final Throwable ex) {
+      try {
+        RestAssured.config = previousRestAssuredConfig;
+      } catch (final Throwable cleanupException) {
+        ex.addSuppressed(cleanupException);
+      } finally {
+        previousRestAssuredConfig = null;
+        globalStateInstalled = false;
+      }
+      ExceptionUtils.sneakyThrow(ex);
+    }
+  }
+
+  /** Releases process-wide resources after the final active KTAF execution finishes. */
+  private static void releaseGlobalState() {
+    cleanup("Unable to close KTAF database pools", DBConnectionPoolStorage::closeAll);
+    if (globalStateInstalled) {
+      cleanup("Unable to restore REST Assured configuration", () -> RestAssured.config = previousRestAssuredConfig);
+    }
+    previousRestAssuredConfig = null;
+    globalStateInstalled = false;
+  }
+
+  /** Runs one lifecycle cleanup action without allowing an ordinary failure to abort later cleanup. */
+  private static void cleanup(final String message, final Runnable action) {
+    try {
+      action.run();
+    } catch (final Throwable ex) {
+      ExceptionUtils.rethrowIfFatal(ex);
+      LOGGER.warn(message, ex);
     }
   }
 
@@ -284,20 +302,15 @@ public final class TestNGListener implements IExecutionListener, IInvokedMethodL
     return Arrays.stream(allowedByTest).anyMatch(selectedByLaunch::contains);
   }
 
-  /**
-   * Returns whether normalized ids intersect or either side is unrestricted.
-   *
-   * <p>Annotation values are validated here rather than silently ignored. Project and service ids
-   * share the same configuration-safe syntax: lower-case letters, digits, and underscores after
-   * normalization.</p>
-   */
-  private static boolean matchesIds(final String[] allowedByTest, final List<String> selectedByLaunch) {
-    if (allowedByTest.length == 0 || selectedByLaunch.isEmpty()) {
-      return true;
-    }
-    return Arrays.stream(allowedByTest)
-      .map(TestNGListener::normalizeId)
-      .anyMatch(selectedByLaunch::contains);
+  /** Returns whether normalized ids intersect or either side is unrestricted. */
+  private static boolean matchesIds(final List<String> allowedByTest, final List<String> selectedByLaunch) {
+    return allowedByTest.isEmpty() || selectedByLaunch.isEmpty()
+      || allowedByTest.stream().anyMatch(selectedByLaunch::contains);
+  }
+
+  /** Validates every project/service id even when no corresponding launch filter is configured. */
+  private static List<String> normalizeIds(final String[] values) {
+    return Arrays.stream(values).map(TestNGListener::normalizeId).toList();
   }
 
   /** Validates and normalizes an id declared directly in {@link TestInfo}. */
