@@ -21,7 +21,7 @@ jobs:
           java-version: '21'
           cache: maven
       - name: Verify core build
-        run: ./mvnw -B -ntp clean verify
+        run: sh ./mvnw -B -ntp clean verify
 
   integration:
     name: PostgreSQL and Kafka integration
@@ -36,7 +36,7 @@ jobs:
           java-version: '21'
           cache: maven
       - name: Run container-backed integration example
-        run: ./mvnw -B -ntp test -Pintegration -Dgroups=container
+        run: sh ./mvnw -B -ntp test -Pintegration -Dgroups=container
 
   ui:
     name: Headless UI
@@ -51,4 +51,4 @@ jobs:
           java-version: '21'
           cache: maven
       - name: Run headless UI example
-        run: ./mvnw -B -ntp test -Pui -Dgroups=ui -Dselenide.headless=true
+        run: sh ./mvnw -B -ntp test -Pui -Dgroups=ui -Dselenide.headless=true
