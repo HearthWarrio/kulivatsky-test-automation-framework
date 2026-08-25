@@ -42,7 +42,7 @@ public abstract class BasePage {
       try {
         textElement(page.title()).shouldBe(visible, DEFAULT_TIMEOUT);
       } catch (final RuntimeException | AssertionError ex) {
-        throw new IllegalStateException("Page title marker is not visible");
+        throw new IllegalStateException("Page title marker is not visible", ex);
       }
     }
     if (!page.xPath().isBlank()) {
@@ -84,12 +84,16 @@ public abstract class BasePage {
       try {
         textElement(text).shouldBe(visible).click();
       } catch (final RuntimeException | AssertionError ex) {
-        throw new AssertionError("No visible element matched the requested text");
+        throw new AssertionError("No visible element matched the requested text", ex);
       }
     });
   }
 
-  /** @return current browser URL as reported by Selenium */
+  /**
+   * Returns the current browser URL reported by Selenium.
+   *
+   * @return current browser URL as reported by Selenium
+   */
   public String getUrl() {
     return step("Read current URL", () -> WebDriverRunner.getWebDriver().getCurrentUrl());
   }
@@ -104,12 +108,21 @@ public abstract class BasePage {
     return elements.texts();
   }
 
-  /** Waits until an element is enabled, then clicks it. */
+  /**
+   * Waits until an element is enabled, then clicks it.
+   *
+   * @param element element to wait for and click
+   */
   public void safeClick(final SelenideElement element) {
     element.shouldBe(enabled).click();
   }
 
-  /** Waits until an input is enabled, then replaces its value. */
+  /**
+   * Waits until an input is enabled, then replaces its value.
+   *
+   * @param element input to wait for and update
+   * @param value value written to the input
+   */
   public void fillInput(final SelenideElement element, final String value) {
     element.shouldBe(enabled).setValue(value);
   }

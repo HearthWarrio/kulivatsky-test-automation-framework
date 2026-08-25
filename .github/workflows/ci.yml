@@ -36,7 +36,10 @@ jobs:
           java-version: '21'
           cache: maven
       - name: Run container-backed integration example
-        run: sh ./mvnw -B -ntp test -Pintegration -Dgroups=container
+        run: sh ./mvnw -B -ntp -e -DtrimStackTrace=false test -Pintegration -Dgroups=container
+      - name: Print integration test report on failure
+        if: failure()
+        run: cat target/surefire-reports/*.txt 2>/dev/null || true
 
   ui:
     name: Headless UI
@@ -51,4 +54,7 @@ jobs:
           java-version: '21'
           cache: maven
       - name: Run headless UI example
-        run: sh ./mvnw -B -ntp test -Pui -Dgroups=ui -Dselenide.headless=true
+        run: sh ./mvnw -B -ntp -e -DtrimStackTrace=false test -Pui -Dgroups=ui -Dselenide.headless=true
+      - name: Print UI test report on failure
+        if: failure()
+        run: cat target/surefire-reports/*.txt 2>/dev/null || true

@@ -74,7 +74,7 @@ public final class ComplexBackendTest {
       .withPassword("demo");
     this.postgres.start();
 
-    this.kafkaContainer = new KafkaContainer("apache/kafka-native:3.9.2");
+    this.kafkaContainer = new KafkaContainer("apache/kafka-native:3.8.0");
     this.kafkaContainer.start();
 
     setDatabaseProperty("driver", "org.postgresql.Driver");

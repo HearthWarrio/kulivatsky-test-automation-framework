@@ -66,11 +66,11 @@ public final class MavenBootstrap {
     )) {
       final FileLock lock = channel.lock();
       try {
-        if (!isInstalled(mavenHome)) {
+        if (!isInstalled(mavenHome, mavenVersion, expectedSha512)) {
           final String archiveName = Path.of(distributionUri.getPath()).getFileName().toString();
           final Path archive = cacheRoot.resolve(archiveName);
           ensureArchive(distributionUri, archive, expectedSha512);
-          installArchive(archive, cacheRoot, mavenHome, mavenVersion);
+          installArchive(archive, cacheRoot, mavenHome, mavenVersion, expectedSha512);
         }
       } finally {
         lock.release();
@@ -98,10 +98,23 @@ public final class MavenBootstrap {
     return value.trim();
   }
 
-  /** Returns whether a complete Maven launcher is already present. */
-  private static boolean isInstalled(final Path mavenHome) {
-    return Files.isRegularFile(mavenHome.resolve("bin/mvn"))
-      && Files.isRegularFile(mavenHome.resolve("bin/mvn.cmd"));
+  /** Returns whether the cached Maven home matches the configured verified distribution. */
+  private static boolean isInstalled(final Path mavenHome,
+                                     final String mavenVersion,
+                                     final String expectedSha512) {
+    final Path provenance = mavenHome.resolve(".distribution.sha512");
+    if (!Files.isRegularFile(mavenHome.resolve("bin/mvn"))
+      || !Files.isRegularFile(mavenHome.resolve("bin/mvn.cmd"))
+      || !Files.isRegularFile(mavenHome.resolve("conf/settings.xml"))
+      || !Files.isRegularFile(mavenHome.resolve("lib/maven-core-" + mavenVersion + ".jar"))
+      || !Files.isRegularFile(provenance)) {
+      return false;
+    }
+    try {
+      return expectedSha512.equals(Files.readString(provenance, StandardCharsets.UTF_8).trim());
+    } catch (final IOException ex) {
+      return false;
+    }
   }
 
   /** Reuses a verified cached archive or downloads and atomically publishes a fresh one. */
@@ -153,13 +166,25 @@ public final class MavenBootstrap {
   private static void installArchive(final Path archive,
                                      final Path cacheRoot,
                                      final Path mavenHome,
-                                     final String mavenVersion) throws IOException {
+                                     final String mavenVersion,
+                                     final String expectedSha512) throws IOException {
     final Path extractionRoot = Files.createTempDirectory(cacheRoot, ".maven-extract-");
     try {
       unzip(archive, extractionRoot);
       final Path extractedHome = extractionRoot.resolve("apache-maven-" + mavenVersion);
-      if (!isInstalled(extractedHome)) {
+      if (!Files.isDirectory(extractedHome)) {
         throw new IOException("Maven archive does not contain the expected distribution root");
+      }
+      Files.writeString(
+        extractedHome.resolve(".distribution.sha512"),
+        expectedSha512 + System.lineSeparator(),
+        StandardCharsets.UTF_8,
+        StandardOpenOption.CREATE,
+        StandardOpenOption.TRUNCATE_EXISTING,
+        StandardOpenOption.WRITE
+      );
+      if (!isInstalled(extractedHome, mavenVersion, expectedSha512)) {
+        throw new IOException("Maven archive does not contain a complete distribution");
       }
       deleteTree(mavenHome);
       move(extractedHome, mavenHome);

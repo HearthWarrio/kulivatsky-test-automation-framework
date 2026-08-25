@@ -42,7 +42,12 @@ public interface FunctionStep<T, R> {
     return Steps.step(this, value);
   }
 
-  /** Default immutable {@link FunctionStep} implementation. */
+  /**
+   * Default immutable {@link FunctionStep} implementation.
+   *
+   * @param <T> input type
+   * @param <R> result type
+   */
   final class Of<T, R> implements FunctionStep<T, R> {
     /** Name written to Allure. */
     private final String name;

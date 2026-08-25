@@ -47,7 +47,11 @@ public interface Val<T> {
     return new Impl<>(value);
   }
 
-  /** Default synchronized {@link Val} implementation. */
+  /**
+   * Default synchronized {@link Val} implementation.
+   *
+   * @param <T> stored value type
+   */
   final class Impl<T> implements Val<T> {
     /** Monitor guarding the initialized/value pair. */
     private final Object lock;

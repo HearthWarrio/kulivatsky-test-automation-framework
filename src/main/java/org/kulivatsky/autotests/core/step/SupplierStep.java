@@ -40,7 +40,11 @@ public interface SupplierStep<R> {
     return Steps.step(this);
   }
 
-  /** Default immutable {@link SupplierStep} implementation. */
+  /**
+   * Default immutable {@link SupplierStep} implementation.
+   *
+   * @param <R> value produced by the step
+   */
   final class Of<R> implements SupplierStep<R> {
     /** Name written to Allure. */
     private final String name;

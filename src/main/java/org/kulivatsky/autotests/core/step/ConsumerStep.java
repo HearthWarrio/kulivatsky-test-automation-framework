@@ -40,7 +40,11 @@ public interface ConsumerStep<T> {
     Steps.step(this, value);
   }
 
-  /** Default immutable {@link ConsumerStep} implementation. */
+  /**
+   * Default immutable {@link ConsumerStep} implementation.
+   *
+   * @param <T> value consumed by the step
+   */
   final class Of<T> implements ConsumerStep<T> {
     /** Name written to Allure. */
     private final String name;

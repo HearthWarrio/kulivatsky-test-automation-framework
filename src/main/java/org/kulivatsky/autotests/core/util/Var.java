@@ -45,7 +45,11 @@ public interface Var<T> {
     return new Impl<>(value);
   }
 
-  /** Default synchronized {@link Var} implementation. */
+  /**
+   * Default synchronized {@link Var} implementation.
+   *
+   * @param <T> stored value type
+   */
   final class Impl<T> implements Var<T> {
     /** Monitor guarding the initialized/value pair. */
     private final Object lock;
