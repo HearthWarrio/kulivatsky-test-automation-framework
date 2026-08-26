@@ -26,7 +26,7 @@ public final class MediumUiTest {
   private boolean configurationCaptured;
 
   /** Configures a headless browser and starts the local catalog server. */
-  @BeforeMethod
+  @BeforeMethod(alwaysRun = true)
   public void setUp() {
     this.previousHeadless = Configuration.headless;
     this.previousBrowserSize = Configuration.browserSize;

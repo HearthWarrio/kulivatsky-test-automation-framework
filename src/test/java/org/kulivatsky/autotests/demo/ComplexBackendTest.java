@@ -66,7 +66,7 @@ public final class ComplexBackendTest {
   private final Map<String, String> previousProperties = new HashMap<>();
 
   /** Starts real infrastructure and wires its dynamic addresses into framework configuration. */
-  @BeforeMethod
+  @BeforeMethod(alwaysRun = true)
   public void setUp() {
     this.postgres = new PostgreSQLContainer("postgres:16-alpine")
       .withDatabaseName("demo")

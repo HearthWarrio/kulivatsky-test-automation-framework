@@ -47,7 +47,11 @@ public final class Config {
     this.properties = properties;
   }
 
-  /** @return process-wide configuration facade */
+  /**
+   * Returns the process-wide configuration facade.
+   *
+   * @return process-wide configuration facade
+   */
   public static Config current() {
     return CURRENT;
   }
@@ -70,17 +74,29 @@ public final class Config {
     return enumValue("autotests.launch", Launch.Option.class, Launch.Option.LOCAL);
   }
 
-  /** @return test types selected by {@code autotests.testType}; empty means no filter */
+  /**
+   * Reads the optional test-type launch filter.
+   *
+   * @return test types selected by {@code autotests.testType}; empty means no filter
+   */
   public List<TestType> testType() {
     return enumValues("autotests.testType", TestType.Option.class).stream().map(value -> (TestType) value).toList();
   }
 
-  /** @return test subjects selected by {@code autotests.testSubject}; empty means no filter */
+  /**
+   * Reads the optional test-subject launch filter.
+   *
+   * @return test subjects selected by {@code autotests.testSubject}; empty means no filter
+   */
   public List<TestSubject> testSubject() {
     return enumValues("autotests.testSubject", TestSubject.Option.class).stream().map(value -> (TestSubject) value).toList();
   }
 
-  /** @return test levels selected by {@code autotests.testLevel}; empty means no filter */
+  /**
+   * Reads the optional test-level launch filter.
+   *
+   * @return test levels selected by {@code autotests.testLevel}; empty means no filter
+   */
   public List<TestLevel> testLevel() {
     return enumValues("autotests.testLevel", TestLevel.Option.class).stream().map(value -> (TestLevel) value).toList();
   }

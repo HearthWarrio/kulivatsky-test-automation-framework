@@ -26,12 +26,20 @@ public final class DateUtils {
   private DateUtils() {
   }
 
-  /** @return current instant from the system UTC clock */
+  /**
+   * Returns the current instant from the system UTC clock.
+   *
+   * @return current instant from the system UTC clock
+   */
   public static Instant utcInstant() {
     return Clock.systemUTC().instant();
   }
 
-  /** @return current instant represented as legacy {@link Date} */
+  /**
+   * Returns the current instant represented as a legacy {@link Date}.
+   *
+   * @return current instant represented as legacy {@link Date}
+   */
   public static Date utcDate() {
     return dateOf(utcInstant());
   }
@@ -179,7 +187,12 @@ public final class DateUtils {
     return parsed;
   }
 
-  /** @return parsed date using {@code yyyy-MM-dd} */
+  /**
+   * Parses a legacy date using the {@code yyyy-MM-dd} pattern.
+   *
+   * @param value text to parse
+   * @return parsed date using {@code yyyy-MM-dd}
+   */
   public static Date dateOf(final String value) {
     return dateOf("yyyy-MM-dd", value);
   }
@@ -195,7 +208,12 @@ public final class DateUtils {
     return new SimpleDateFormat(format).format(date);
   }
 
-  /** @return text using {@code yyyy-MM-dd'T'HH:mm:ss.SSSXXX} in the JVM default timezone */
+  /**
+   * Formats a legacy date with millisecond precision and the JVM default timezone offset.
+   *
+   * @param date date to format
+   * @return text using {@code yyyy-MM-dd'T'HH:mm:ss.SSSXXX} in the JVM default timezone
+   */
   public static String strDateOf(final Date date) {
     return strDateOf(date, "yyyy-MM-dd'T'HH:mm:ss.SSSXXX");
   }

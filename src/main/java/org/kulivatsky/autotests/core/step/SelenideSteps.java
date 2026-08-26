@@ -18,17 +18,30 @@ public final class SelenideSteps {
   private SelenideSteps() {
   }
 
-  /** @return step that opens a URL using Selenide's default driver */
+  /**
+   * Creates a step that opens a URL using Selenide's default driver.
+   *
+   * @param url URL opened by Selenide
+   * @return lazy browser step
+   */
   public static RunnableStep open(final String url) {
     return new RunnableStep.Of("Open page", params("url", url), () -> Selenide.open(url));
   }
 
-  /** @return step that closes Selenide's default WebDriver */
+  /**
+   * Creates a step that closes Selenide's default WebDriver.
+   *
+   * @return lazy browser step
+   */
   public static RunnableStep close() {
     return new RunnableStep.Of("Close browser", Selenide::closeWebDriver);
   }
 
-  /** @return step that refreshes the current page */
+  /**
+   * Creates a step that refreshes the current page.
+   *
+   * @return lazy browser step
+   */
   public static RunnableStep refresh() {
     return new RunnableStep.Of("Refresh page", Selenide::refresh);
   }
@@ -102,7 +115,11 @@ public final class SelenideSteps {
     return Objects.requireNonNull(cookie, "Cookie not found: " + cookieName).getValue();
   }
 
-  /** @return cookies visible to the current browser session */
+  /**
+   * Returns all cookies visible to the current browser session.
+   *
+   * @return cookies visible to the current browser session
+   */
   public static Set<Cookie> getCookies() {
     return WebDriverRunner.getWebDriver().manage().getCookies();
   }

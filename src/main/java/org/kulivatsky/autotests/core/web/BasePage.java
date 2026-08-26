@@ -41,8 +41,10 @@ public abstract class BasePage {
     if (!page.title().isBlank()) {
       try {
         textElement(page.title()).shouldBe(visible, DEFAULT_TIMEOUT);
-      } catch (final RuntimeException | AssertionError ex) {
-        throw new IllegalStateException("Page title marker is not visible", ex);
+      } catch (final AssertionError ex) {
+        throw new AssertionError("Page title marker is not visible", ex);
+      } catch (final RuntimeException ex) {
+        throw new IllegalStateException("Unable to verify page title marker visibility", ex);
       }
     }
     if (!page.xPath().isBlank()) {
@@ -83,8 +85,10 @@ public abstract class BasePage {
     step("Click element by visible text", () -> {
       try {
         textElement(text).shouldBe(visible).click();
-      } catch (final RuntimeException | AssertionError ex) {
+      } catch (final AssertionError ex) {
         throw new AssertionError("No visible element matched the requested text", ex);
+      } catch (final RuntimeException ex) {
+        throw new IllegalStateException("Unable to click element by visible text", ex);
       }
     });
   }

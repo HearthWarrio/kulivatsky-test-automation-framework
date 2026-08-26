@@ -44,7 +44,12 @@ public final class CommonSteps {
     );
   }
 
-  /** @return lazy delay step measured in whole seconds */
+  /**
+   * Creates a delay step measured in whole seconds.
+   *
+   * @param seconds number of seconds to wait
+   * @return lazy delay step measured in whole seconds
+   */
   public static RunnableStep delay(final long seconds) {
     return delay(Duration.ofSeconds(seconds));
   }

@@ -17,8 +17,10 @@ import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.Properties;
+import java.util.Set;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
@@ -57,6 +59,8 @@ public final class MavenBootstrap {
     final URI distributionUri = URI.create(requiredProperty(properties, "distributionUrl"));
     final String expectedSha512 = requiredProperty(properties, "distributionSha512Sum").toLowerCase();
     final Path mavenHome = cacheRoot.resolve("apache-maven-" + mavenVersion);
+    final String archiveName = Path.of(distributionUri.getPath()).getFileName().toString();
+    final Path archive = cacheRoot.resolve(archiveName);
 
     Files.createDirectories(cacheRoot);
     try (FileChannel channel = FileChannel.open(
@@ -66,10 +70,8 @@ public final class MavenBootstrap {
     )) {
       final FileLock lock = channel.lock();
       try {
-        if (!isInstalled(mavenHome, mavenVersion, expectedSha512)) {
-          final String archiveName = Path.of(distributionUri.getPath()).getFileName().toString();
-          final Path archive = cacheRoot.resolve(archiveName);
-          ensureArchive(distributionUri, archive, expectedSha512);
+        ensureArchive(distributionUri, archive, expectedSha512);
+        if (!isInstalled(mavenHome, archive, mavenVersion, expectedSha512)) {
           installArchive(archive, cacheRoot, mavenHome, mavenVersion, expectedSha512);
         }
       } finally {
@@ -98,8 +100,9 @@ public final class MavenBootstrap {
     return value.trim();
   }
 
-  /** Returns whether the cached Maven home matches the configured verified distribution. */
+  /** Returns whether the cached Maven home exactly matches the configured verified distribution. */
   private static boolean isInstalled(final Path mavenHome,
+                                     final Path archive,
                                      final String mavenVersion,
                                      final String expectedSha512) {
     final Path provenance = mavenHome.resolve(".distribution.sha512");
@@ -111,9 +114,62 @@ public final class MavenBootstrap {
       return false;
     }
     try {
-      return expectedSha512.equals(Files.readString(provenance, StandardCharsets.UTF_8).trim());
+      return expectedSha512.equals(Files.readString(provenance, StandardCharsets.UTF_8).trim())
+        && matchesArchive(mavenHome, archive, mavenVersion);
     } catch (final IOException ex) {
       return false;
+    }
+  }
+
+  /** Compares every installed Maven file with the already checksum-verified distribution ZIP. */
+  private static boolean matchesArchive(final Path mavenHome,
+                                        final Path archive,
+                                        final String mavenVersion) throws IOException {
+    final String distributionRoot = "apache-maven-" + mavenVersion + "/";
+    final Set<Path> expectedFiles = new HashSet<>();
+    try (ZipInputStream input = new ZipInputStream(Files.newInputStream(archive))) {
+      ZipEntry entry;
+      while ((entry = input.getNextEntry()) != null) {
+        final String entryName = entry.getName();
+        if (!entryName.startsWith(distributionRoot)) {
+          input.closeEntry();
+          continue;
+        }
+        final String relativeName = entryName.substring(distributionRoot.length());
+        if (relativeName.isEmpty()) {
+          input.closeEntry();
+          continue;
+        }
+        final Path target = mavenHome.resolve(relativeName).normalize();
+        if (!target.startsWith(mavenHome)) {
+          return false;
+        }
+        if (entry.isDirectory()) {
+          if (!Files.isDirectory(target)) {
+            return false;
+          }
+        } else {
+          if (!Files.isRegularFile(target) || !hasSameContent(input, target)) {
+            return false;
+          }
+          expectedFiles.add(target);
+        }
+        input.closeEntry();
+      }
+    }
+
+    try (var installedFiles = Files.walk(mavenHome)) {
+      return installedFiles
+        .filter(Files::isRegularFile)
+        .filter(path -> !path.equals(mavenHome.resolve(".distribution.sha512")))
+        .allMatch(expectedFiles::contains);
+    }
+  }
+
+  /** Compares the current ZIP entry with an installed file without buffering either one in memory. */
+  private static boolean hasSameContent(final InputStream archiveEntry, final Path installedFile) throws IOException {
+    try (InputStream installed = Files.newInputStream(installedFile)) {
+      return sha512(archiveEntry).equals(sha512(installed));
     }
   }
 
@@ -142,21 +198,26 @@ public final class MavenBootstrap {
     }
   }
 
-  /** Computes a lower-case SHA-512 digest without loading the archive into memory. */
+  /** Computes a lower-case SHA-512 digest without loading the file into memory. */
   private static String sha512(final Path file) throws IOException {
+    try (InputStream input = Files.newInputStream(file)) {
+      return sha512(input);
+    }
+  }
+
+  /** Computes a lower-case SHA-512 digest for the remaining bytes of a stream. */
+  private static String sha512(final InputStream input) throws IOException {
     final MessageDigest digest;
     try {
       digest = MessageDigest.getInstance("SHA-512");
     } catch (final NoSuchAlgorithmException ex) {
       throw new IllegalStateException("JDK does not provide SHA-512", ex);
     }
-    try (InputStream input = Files.newInputStream(file)) {
-      final byte[] buffer = new byte[64 * 1024];
-      int read;
-      while ((read = input.read(buffer)) >= 0) {
-        if (read > 0) {
-          digest.update(buffer, 0, read);
-        }
+    final byte[] buffer = new byte[64 * 1024];
+    int read;
+    while ((read = input.read(buffer)) >= 0) {
+      if (read > 0) {
+        digest.update(buffer, 0, read);
       }
     }
     return HexFormat.of().formatHex(digest.digest());
@@ -183,7 +244,7 @@ public final class MavenBootstrap {
         StandardOpenOption.TRUNCATE_EXISTING,
         StandardOpenOption.WRITE
       );
-      if (!isInstalled(extractedHome, mavenVersion, expectedSha512)) {
+      if (!isInstalled(extractedHome, archive, mavenVersion, expectedSha512)) {
         throw new IOException("Maven archive does not contain a complete distribution");
       }
       deleteTree(mavenHome);

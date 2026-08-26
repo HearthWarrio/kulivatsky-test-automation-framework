@@ -66,6 +66,10 @@ public final class TestNGListener implements IExecutionListener, IInvokedMethodL
   /** Guards this listener instance from incrementing/decrementing the global lifecycle twice. */
   private boolean executionRegistered;
 
+  /** Creates a listener with the default per-test browser cleanup policy. */
+  public TestNGListener() {
+  }
+
   /**
    * Returns the TestNG result bound to the current thread.
    *
